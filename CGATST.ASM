@@ -15,7 +15,7 @@ start:
     mov     ah,0x3f             ; DOS FileRead function
     mov     cx,16000            ; Read 16000 bytes
     xor     al,al
-    lea     dx,picture          ; DS:picture is the buffer
+    mov     dx,picture          ; DS:picture is the buffer
     int     0x21
 
     mov     ah,0x3e             ; DOS FileClose
@@ -80,5 +80,5 @@ start:
     int     0x21
 
 filename:
-    db "rainbow.raw$"
+    db "rainbow.raw",0
 picture:
