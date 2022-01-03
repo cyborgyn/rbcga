@@ -1,3 +1,14 @@
+;-----------------------------------------------------------
+; Test CGA B&W 640x200 screen mode, by displaying bitmap
+; - int 0x10, setscreen 0x0006
+; - use 16k 0xB800:0000 CGA screen buffer
+; - int 0x10, setscreen 0x0003
+; - int 0x10, cursorpos 0x0200
+; Note:
+; The bitmap is a truncated 1bpp BMP file, without headers,
+; with exactly 640x200 pixels. The row order in BMP is
+; reversed, while the column order is the same as screen.
+;-----------------------------------------------------------
 use16
 cpu 8086
 org 0x100
