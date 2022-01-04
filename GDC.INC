@@ -73,6 +73,9 @@ GDC_CMD_PRAM:	equ 0x70		; PRAM load, 1-16 params
 ;-----------------------------------------------------------
 ; Rainbow 100 Graphics Option specific defines
 ;-----------------------------------------------------------
+GDC_IRQ:		equ 0xa2		; A2 on Rainbow 100-B
+GDC_IRQ_ADDR:	equ GDC_IRQ << 3; Address of irq in irq table
+
 GDCP_RESET:     equ 0x50
 GDCP_IND_DATA:  equ 0x51
 GDCP_IND_ADDR:  equ 0x53        ; Accepts GDCIR_*
