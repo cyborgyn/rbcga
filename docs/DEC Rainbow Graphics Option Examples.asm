@@ -409,7 +409,7 @@ insc0:  stosb
 ;relocated vectors.  Read the old vector, save it, and overwrite it
 ;with the new vector.  Before we call the interrupt, we need to 
 ;make sure that the GDC is not in the process of writing something 
-out to the bitmap.
+;out to the bitmap.
 ;
 ascrol: call    gdc_not_busy          ;check if GDC id busy
         push    es
@@ -1199,3 +1199,741 @@ ritvid  endp
 cseg ends
 
 end
+
+;************************************************************************
+;*                                                                      *
+;*      p r o c e d u r e s   t o   w r i t e   a   c o l o r           *
+;*                                                                      *
+;*      t o   a   r e c t a n g l e   o n   t h e   s c r e e n         *
+;*                                                                      *
+;*                                                                      *
+;*                                                                      *
+;*                                                                      *
+;*                                                                      *
+;*                                                                      *
+;************************************************************************
+        public  set_all_screen,set_rectangle
+extrn   curl0:word,gbmod:byte,alups:near,xmax:word,ymax:word
+extrn   fgbg:near,fifo_empty:near
+dseg    segment byte    public  'datasg'
+;
+;       define the GDC commands
+;
+curs    equ     49h     ;cursor address specify command
+figs    equ     4ch     ;figure specify command.
+s_on    equ     0dh     ;bctrl command for screen on.
+;
+;       define the graphics board port addresses
+;
+cmaskl  equ     54h     ;write mask low byte
+cmaskh  equ     55h     ;write mask high byte
+gstat   equ     56h     ;GDC status reg (read only)
+gcmd    equ     57h     ;GDC command port (write only)
+xstart  dw      0
+ystart  dw      0
+xstop   dw      0
+ystop   dw      0
+nmritl   dw      0
+dseg            ends
+cseg    segment byte    public  'codesg'
+        assume  cs:cseg,ds:dseg,es:nothing,ss:nothing
+        subttl set all screen
+
+;************************************************************************
+;*                                                                      *
+;*              p r o c e d u r e   s e t   a l l   s c r e e n         *
+;*                                                                      *
+;*  purpose:    set all of the screen to a user defined color.          *
+;*  entry:      di is the color to clear the screen to.                 *
+;*  exit:                                                               *
+;*  registers:                                                          *
+;*  stack usage:                                                        *
+;*                                                                      *
+;*                                                                      *
+;*                                                                      *
+;************************************************************************
+set_all_screen  proc    near
+;
+;load ax and bx with 0. ax and bx will be used as the upper left corner
+; of the rectangle to be written. load cx and dx with the maximum x and
+;y of the screen. cx and dx are used to define the bottom right corner
+;of the screen.
+;
+        mov     ax,0                    ;start at the top left corner.
+        mov     bx,0
+        mov     cx,word ptr xmax        ;fetch the bottom right corner
+        mov     dx,word ptr ymax        ;coordinates.
+        jmp     set_rectangle           ;lower right max setup by init.
+set_all_screen  endp
+
+
+        subttl set a rectangle to one color
+
+
+;************************************************************************
+;*                                                                      *
+;*              p r o c e d u r e   s e t   r e c t a n g l e           *
+;*                                                                      *
+;*  purpose:    set a user defined screen rectangle to a user           *
+;*              defined color.                                          *
+;*  entry:      ax has the start x in pixels                            *
+;*              bx has the start y in scan lines                        *
+;*              cx has the stop x in pixels                             *
+;*              dx has the stop y in scan lines                         *
+;*              di is the color to clear the screen to.                 *
+;*  exit:                                                               *
+;*  registers:                                                          *
+;*  stack usage:                                                        *
+;*                                                                      *
+;*                                                                      *
+;*                                                                      *
+;************************************************************************
+set_rectangle           proc    near
+;
+;save the start/stop coordinates; then, check to see if the option is 
+;currently occupied before making any changes to its current state.
+;this example is not checking for valid entry values.  ax must be less
+;than cx.  bx must be less than dx.
+;
+        mov     word ptr xstart,ax
+        mov     word ptr ystart,bx
+        mov     word ptr xstop,cx
+        mov     word ptr ystop,dx
+        call    fifo_empty    ;wait for an unoccupied graphics option.
+;
+;assert the new screen color to both sides of the foreground/background
+;register.  put the option into replace mode with all planes enabled.
+;put the option into write-enabled word mode.
+;
+        mov     bx,di           ;di passes the color. only lowest nibble valid.
+        mov     bh,bl           ;combine the color number into both fg and bg.
+        mov     cl,4            ;shift the color up to the upper nibble.
+        shl     bh,cl
+        or      bl,bh           ;combine the upper nibble with old lower.
+        call    fgbg            ;issue to fgbg register.
+        xor     bl,bl                   ;assert replace mode, all planes.
+        call    alups
+        and     byte ptr gbmod,0fdh     ;put into word mode.
+        or      byte ptr gbmod,10h      ;put into write-enable mode.
+        mov     al,0bfh
+        out     53h,al
+        mov     al,byte ptr gbmod
+        out     51h,al
+;
+;do the rectangle write.
+;
+;write one column at a time.  since the GDC is a word device, we have to
+;take into account that our write window may start on an odd pixel not
+;necessarily on a word boundary.  the graphics options's write mask must be
+;set accordingly.
+;
+;do a write buffer write to the entire rectangle defined by the start/stop
+;values.  calculate the first curl0.  calculate the number of scans per 
+;column to be written.
+;
+        mov     ax,word ptr xstart      ;turn pixel address into word address.
+        mov     cl,4
+        shr     ax,cl
+        mov     dx,word ptr ystart      ;turn scan start into words per line*y.
+        test    byte ptr gbmod,1        ;high resolution?
+        jnz     set1                    ;jump if yes.
+        mov     cl,5                    ;medium resolution = 32 words per line.
+        jmp     set2
+set1:   mov     cl,6                    ;high resolution = 64 words per line.
+set2:   shl     dx,cl
+        add     dx,ax                   ;combine x and y word addresses.
+        mov     word ptr curl0,dx       ;first curl0.
+        mov     ax,word ptr ystop       ;sub start from stop.
+        sub     ax,word ptr ystart
+        mov     word ptr nmritl,ax
+;
+;program the text mask. 
+;
+;there are four possible write conditions: 
+;
+;a)partially write disabled to theleft 
+;b)completely write enabled 
+;c)partially write disabled to the right 
+;d)partially write disabled to both left and right
+;
+;the portion to be write disabled to the left will be the current xstart 
+;pixel information.  as we write a column, we update the current xstart 
+;location.  only the first xstart will have a left hand portion write 
+;disabled.  only the last will have a right hand portion disabled.  if the 
+;first is also the last, a portion of both sides will be disabled.
+;
+cls1:   mov     bx,0ffffh       ;calculate the current write mask.
+        mov     cx,word ptr xstart
+        and     cx,0fh          ;eliminate all but pixel information.
+        shr     bx,cl           ;shift in a 0 for each left  pixel to disable.
+;
+;write buffer write is done by columns.  take the current xstart and use it 
+;as the column to be written to.  when the word address of xstart is greater 
+;than the word address xstop, we are finished.  there is a case where the 
+;current word address of xstop is equal to the current word address of xstart. 
+;in that case, we have to be concerned about write disabling the bits to the 
+;right.  when xstop becomes less than xstart, we are done.
+;
+        mov     ax,word ptr xstart      ;test to see if word xstop is equal
+        and     ax,0fff0h               ;to word xstart.
+        mov     cx,word ptr xstop
+        and     cx,0fff0h
+        cmp     ax,cx                   ;below?
+        jb      cls3                    ;jump if yes.
+        je      cls2                    ;jump if equal. do last write.
+        jmp     exit                    ;all done. exit.
+;
+;we need to set up the right hand write disable. this is also the last write.
+;bx has the left hand write enable mask in it. preserve and combine with the
+;right hand mask which will be (f-stop pixel address) bits on the right.
+;
+cls2:   mov     cx,word ptr xstop       ;strip pixel info out of xstop.
+        and     cx,0fh
+        inc     cx                      ;make endpoint inclusive of write.
+        mov     ax,0ffffh               ;shift the disable mask.
+        shr     ax,cl                   ;wherever there is a one, we want to
+        xor     ax,0ffffh               ;enable writes.
+        and     bx,ax                   ;combine right and left masks.
+;
+;bx currently has the mask bytes in it. where we have a one we want to make a
+;zero so that that particular bit will be write enabled.
+;
+cls3:   xor     bx,0ffffh       ;invert so where there is a 1 we write disable.
+;
+;assert the new text mask. make sure that the GDC is not busy before we change
+;the mask.
+;
+cls4:   call    fifo_empty              ;make sure that the GDC isn't busy.
+        mov     al,bh                   ;assert the upper write mask.
+        out     cmaskh,al
+        mov     al,bl                   ;assert the lower write mask.
+        out     cmaskl,al
+;
+;position the GDC at the top of the column to be written.  this address was
+;calculated earlier and the word need only be fetched and applied. the number
+;of scans to be written has already been calculated.
+;
+        mov     al,curs                 ;assert the GDC cursor address.
+        out     57h,al
+        mov     ax,word ptr curl0       ;assert the word address low byte.
+        out     56h,al
+        mov     al,dh                   ;assert the word address high byte.
+        out     56h,al
+;
+;start the write operation. write mask, alups, gbmod and fgbg are set up. 
+;GDC is positioned.
+;
+        mov     al,figs         ;assert figs to GDC.
+        out     57h,al
+        xor     al,al           ;direction is down.
+        out     56h,al
+        mov     ax,word ptr nmritl
+        out     56h,al          ;assert number of write operations to perform.
+        mov     al,ah
+        out     56h,al
+        mov     al,22h          ;assert write data command.
+        out     57h,al
+        mov     al,0ffh
+        out     56h,al
+        out     56h,al
+;
+;update the xstart coordinate for the start of the next column write.
+;strip off the pixel information and then add 16 pixels to it to get the next
+;word address.
+;
+        and     word ptr xstart,0fff0h  ;strip off pixel info.
+        add     word ptr xstart,16      ;address the next word.
+        inc     word ptr curl0
+        jmp     cls1                    ;check for another column to clear.
+exit:   ret
+set_rectangle   endp
+cseg            ends
+                end
+
+
+;*****************************************************************************
+;                                                                            *
+;        p r o c e d u r e    p a t t e r n _ r e g i s t e r                *
+;                                                                            *
+;        purpose:        Load the Pattern Register                           *
+;                                                                            *
+;        entry:          bl = basic bit pattern data                         *
+;                                                                            *
+;        caution:        You must load the Pattern Multiplier before         *
+;                        loading the Pattern Register                        *
+;                                                                            *
+;*****************************************************************************
+;
+;The following are some register values and the corresponding output patterns 
+;when the repeat factor is a one:
+;
+;          Value          Pattern
+;          -----          -------
+;           0FFh          11111111
+;           0AAh          10101010
+;           0F0h          11110000
+;           0CDh          11001101
+;
+;The following are the same register values and the corresponding output
+;patterns when the repeat factor is a three:
+;
+;          Value          Pattern
+;          -----          -------
+;           0FFh          111111111111111111111111
+;           0AAh          111000111000111000111000
+;           0F0h          111111111111000000000000
+;           0CDh          111111000000111111000111
+;
+cseg     segment byte    public  'codesg'
+         extrn   fifo_empty:near
+         public  pattern_register
+         assume  cs:cseg,ds:nothing,es:nothing,ss:nothing
+pattern_register proc    near
+         call    fifo_empty
+         mov     al,0fbh         ;select the Pattern Register
+         out     53h,al
+         mov     al,bl           ;set up the pattern data
+         out     51h,al          ;load the Pattern Register
+         ret
+pattern_register endp
+cseg     ends
+         end
+
+;*****************************************************************************
+;                                                                            *
+;        p r o c e d u r e    p a t t e r n _ m u l t                        *
+;                                                                            *
+;        purpose:        Load the Pattern Multiplier                         *
+;                                                                            *
+;        entry:          bl = basic bit pattern repeat factor (1 - 16)       *
+;                                                                            *
+;        caution:        You must load the Pattern Multiplier before         *
+;                        loading the Pattern Register                        *
+;                                                                            *
+;*****************************************************************************
+;
+cseg     segment byte    public  'codesg'
+         extrn   fifo_empty:near
+         public  pattern_mult
+         assume  cs:cseg,ds:nothing,es:nothing,ss:nothing
+pattern_mult     proc    near
+         call    fifo_empty
+         dec     bl              ;adjust bl to be zero-relative
+         not     bl              ;invert it (remember Pattern Register is
+                                 ;multiplied by 16 minus multiplier value)
+         mov     al,0fdh         ;select the Pattern Multiplier
+         out     53h,al
+         mov     al,bl           ;load the Pattern Multiplier 
+         out     51h,al
+         ret             
+pattern_mult     endp
+cseg     ends
+         end
+		 
+;*****************************************************************************
+;                                                                            *
+;       p r o c e d u r e    p i x e l                                       *
+;                                                                            *
+;       purpose:        Draw a pixel                                         *
+;                                                                            *
+;       entry:          xinit = x location                                   *
+;                       yinit = y location                                   *
+;                       valid x values  = 0-799 high resolution              *
+;                                       = 0-383 medium resolution            *
+;                       valid y values  = 0-239 medium or high resolution    *
+;                                                                            *
+;*****************************************************************************
+;
+;Do a vector draw of one pixel at location xinit,yinit.  Assume that the
+;Graphics Option is already set up in terms of Mode Register, FG/BG, ALU/PS.
+;
+dseg    segment byte    public  'datasg'
+extrn   gbmod:byte,curl0:byte,curl1:byte,curl2:byte,xinit:word,yinit:word
+dseg    ends
+cseg    segment byte    public  'codesg'
+        public  pixel
+        assume  cs:cseg,ds:dseg,es:dseg,ss:nothing
+pixel   proc    near
+;
+;Convert the starting x,y coordinate pair into a cursor position word value.
+;
+        mov     al,gbmod        ;are we in medium resolution mode?
+        test    al,01
+        jz      pv1             ;jump if yes
+        mov     cl,06           ;use 64 words per line as a divisor
+        jmp     pv2
+pv1:    mov     cl,05           ;use 32 words per line as a divisor
+pv2:    xor     dx,dx           ;set up for 32bit/16bit math by clearing 
+        mov     ax,yinit        ;upper 16 bits
+        shl     ax,cl
+        mov     bx,ax           ;save lines*words per line
+        mov     ax,xinit        ;compute the number of extra words on last line
+        mov     cx,16           ;16 bits per word
+        div     cx              ;ax now has number of extra words to add in
+        add     ax,bx           ;dx has the less than 16 dot address left over
+        mov     curl0,al        ;this results in the new cursor memory address
+        mov     curl1,ah
+        mov     cl,04           ;dot address is high nibble of byte 
+        shl     dl,cl           
+        mov     curl2,dl
+;
+;Position the cursor.
+;
+        mov     al,49h                  ;send out the cursor command byte.
+        out     57h,al
+        mov     ax,word ptr curl0       ;assert cursor location low byte.
+        out     56h,al
+        mov     al,ah                   ;assert cursor location high byte.
+        out     56h,al
+        mov     al,byte ptr curl2       ;assert cursor pixel location.
+        out     56h,al
+;
+;Assert the figs command to draw one pixel's worth of vector.
+;
+        mov     al,4ch          ;assert the FIGS command
+        out     57h,al
+        mov     al,02h          ;line drawn to the right.
+        out     56h,al
+        mov     al,6ch          ;tell the GDC to draw the pixel when ready.
+        out     57h,al
+        ret
+pixel   endp
+cseg    ends
+        end
+
+;******************************************************************************
+;                                                                             *
+;        p r o c e d u r e    v e c t o r                                     *
+;                                                                             *
+;        purpose:        Draw a vector                                        *
+;                                                                             *
+;        entry:          xinit = starting x location                          *
+;                        yinit = starting y location                          *
+;                        xfinal= ending x location                            *
+;                        yfinal= ending y location                            *
+;                        valid x values = 0 - 799 high resolution             *
+;                                         0 - 383 medium resolution           *
+;                        valid y values = 0 - 239 high or medium resolution   *
+;        exit:                                                                *
+;                                                                             *
+;******************************************************************************
+;
+;Assume start and stop co-ordinates to be in registers and
+;all other incidental requirements already taken care of.  This code positions
+;the cursor, computes the FIGS parameters DIR, DC, D, D2, and D1, and then
+;implements the FIGS and FIGD commands.
+;What is not shown here, is that the Mode Register is set up for vector
+;operations, the write mode and planes select is set up in the ALU/PS Register,
+;the FGBG Register is set up with foreground and background colors, and the
+;Pattern Multiplier/Register are loaded. In vector mode all incoming data
+;is from the Pattern Register. We have to make sure that the GDC's pram 8 and
+;9 are all ones so that it will try to write all ones to the bitmap. The
+;external hardware will get in there and put the Pattern Register's data
+;into the bitmap.
+;
+;This same basic setup can be used for area fills, arcs and such.
+;
+extrn    fifo_empty:near,gbmod:byte,p1:byte
+cseg     segment byte    public  'codesg'
+         public  vector
+         assume  cs:cseg,ds:dseg,es:dseg,ss:nothing
+vector   proc    near
+         call    fifo_empty
+         mov     al,78h
+         out     57h,al          ;set pram bytes 8 and 9
+         mov     al,0ffh
+         out     56h,al
+         out     56h,al
+;
+;Convert the starting x,y coordinate pair into a cursor position word value.
+;
+         mov     al,gbmod        ;are we in low resolution mode?
+         test    al,01
+         jz      v11             ;jump if yes
+         mov     cl,06           ;use 64 words per line as a divisor
+         jmp     v2
+v11:     mov     cl,05           ;use 32 words per line as a divisor
+v2:      xor     dx,dx           ;set up for 32bit/16bit math by clearing
+         mov     ax,yinit        ;upper 16 bits
+         shl     ax,cl
+         mov     bx,ax           ;save lines*words per line
+         mov     ax,xinit        ;compute the no. of extra words on last line
+         mov     cx,16           ;16 bits per word
+         div     cx              ;ax now has number of extra words to add in
+         add     ax,bx           ;dx has the less than 16 dot address left over
+         mov     curl0,al        ;this results in the new cursor memory address
+         mov     curl1,ah
+         mov     cl,04           ;dot address is high nibble of byte 
+         shl     dl,cl           ;
+         mov     curl2,dl
+         mov     al,49h          ;set cursor location to that in curl0,1,2
+         out     57h,al          ;issue the GDC cursor location command
+         mov     al,curl0        ;fetch word low address
+         out     56h,al
+         mov     al,curl1        ;word middle address
+         out     56h,al
+         mov     al,curl2        ;dot address (top 4 bits) and high word addr
+         out     56h,al
+;
+;Draw a vector. 
+;
+        mov     ax,word ptr xinit       ;is this a single point draw?
+        cmp     word ptr xfinal,ax      ;if yes then start=stop coordinates.
+        jnz     v1                      ;jump if definitely not.
+        mov     ax,word ptr yinit       ;maybe. check y coordinates.
+        cmp     word ptr yfinal,ax
+        jnz     v1                      ;jump if definitely not.
+        mov     al,04ch                 ;program a single pixel write 
+        out     57h,al                  ;operation
+        mov     al,2                    ;direction is to the right..
+        out     56h,al
+        mov     al,06ch
+        out     57h,al
+        ret
+v1:     mov     bx,yfinal       ;compute delta y
+        sub     bx,yinit        ;delta y negative now?
+        jns     quad34          ;jump if not (must be either quad 3 or 4)
+quad12: neg     bx              ;delta y is negative, make absolute
+        mov     ax,xfinal       ;compute delta x
+        sub     ax,xinit        ;delta x negative?
+        js      quad2           ;jump if yes
+quad1:  cmp     ax,bx           ;octant 2?
+        jbe     oct3            ;jump if not
+oct2:   mov     p1,02           ;direction of write
+        jmp     vxind   ;abs(deltax)>abs(deltay), independent axis=x-axis
+oct3:   mov     p1,03           ;direction of write
+        jmp     vyind   ;abs(deltax)=<abs(deltay), independent axis=y-axis
+quad2:  neg     ax              ;delta x is negative, make absolute
+        cmp     ax,bx           ;octant 4?
+        jae     oct5            ;jump if not
+oct4:   mov     p1,04           ;direction of write
+        jmp     vyind   ;abs(deltax)=<abs(deltay), independent axis=y-axis
+oct5:   mov     p1,05           ;direction of write
+        jmp     vxind   ;abs(deltax)>abs(deltay), independent axis=x-axis
+quad34: mov     ax,xfinal       ;compute delta x
+        sub     ax,xinit
+        jns     quad4           ;jump if delta x is positive
+quad3:  neg     ax              ;make delta x absolute instead of negative
+        cmp     ax,bx           ;octant 6?
+        jbe     oct7            ;jump if not
+oct6:   mov     p1,06           ;direction of write
+        jmp     vxind   ;abs(deltax)>abs(deltay), independent axis=x-axis
+oct7:   mov     p1,07           ;direction of write
+        jmp     vyind   ;abs(deltax)<=abs(deltay), independent axis=y-axis
+quad4:  cmp     ax,bx           ;octant 0?
+        jae     oct1            ;jump if not
+oct0:   mov     p1,0            ;direction of write
+        jmp     vyind   ;abs(deltax)<abs(deltay), independent axis=y-axis
+oct1:   mov     p1,01           ;direction of write
+        jmp     vxind   ;abs(deltax)=>(deltay), independent axis=x-axis
+;
+vyind:  xchg    ax,bx           ;put independent axis in ax, dependent in bx
+vxind:  and     ax,03fffh       ;limit to 14 bits
+        mov     dc,ax           ;DC=abs(delta x)-1
+        push    bx              ;save abs(delta y)
+        shl     bx,01           ;multiply delta y by two
+        sub     bx,ax
+        and     bx,03fffh       ;limit to 14 bits
+        mov     d,bx            ;D=2*abs(delta y)-abs(delta x)
+        pop     bx              ;restore (abs(delta y)
+        push    bx              ;save abs(delta y)
+        sub     bx,ax
+        shl     bx,1
+        and     bx,03fffh       ;limit to 14 bits
+        mov     d2,bx           ;D2=2*(abs(delta y)-abs(delta x))
+        pop     bx
+        shl     bx,1
+        dec     bx
+        and     bx,03fffh       ;limit to 14 bits
+        mov     d1,bx           ;D1=2*abs(delta y)-1
+vdo:    mov     al,04ch         ;issue the FIGS command
+        out     57h,al
+        mov     al,08           ;construct P1 of FIGS command
+        or      al,byte ptr p1
+        out     56h,al          ;issue a parameter byte
+        mov     si,offset dc
+        mov     cx,08           ;issue the 8 bytes of DC,D,D2,D1
+vdo1:   mov     al,[si]         ;fetch byte
+        out     56h,al          ;issue to the GDC
+        inc     si              ;point to next in list
+        loop    vdo1            ;loop until all 8 done
+        mov     al,06ch         ;start the drawing process in motion
+        out     57h,al          ;by issuing FIGD
+        ret
+vector  endp
+cseg    ends
+dseg    segment byte    public  'datasg'
+        public  curl0,curl1,curl2,dc,d,d2,d1,dm,dir,xinit,yinit
+        public  xfinal,yfinal
+curl0   db      0
+curl1   db      0
+curl2   db      0
+dc      dw      0
+d       dw      0
+d2      dw      0
+d1      dw      0
+dm      dw      0
+dir     dw      0
+xinit   dw      0
+yinit   dw      0
+xfinal  dw      0
+yfinal  dw      0
+dseg    ends
+        end
+
+
+;*****************************************************************************
+;                                                                            *
+;       p r o c e d u r e    c i r c l e                                     *
+;                                                                            *
+;       purpose:        Draw a circle in medium resolution mode              *
+;                                                                            *
+;       entry:          xinit = circle center x coordinate (0-799)           *
+;                       yinit = circle center y coordinate (0-239)           *
+;                       radius = radius of the circle in pixels              *
+;                                                                            *
+;       caution:        This routine will only work in medium resolution     *
+;                       mode. Due to the aspect ratio of high resolution     *
+;                       mode, circles appear as ellipses.                    *
+;                                                                            *
+;******************************************************************************
+;
+;Draw an circle. 
+;
+;This code positions the cursor and computes the FIGS parameters DIR, DC,
+;D, D2, and D1. It then implements the actual FIGS and FIGD commands.
+;What you don't see here is that the Mode Register is set up for vector
+;operations, the write mode and planes select are set up in the ALU/PS,
+;the FGBG Register is loaded with foreground and background colors and the
+;Pattern Multiplier/Register are loaded. In vector mode, all incoming data
+;is from the Pattern Register. We have to make sure that the GDC's pram 8 and
+;9 are all ones so that it will try to write all ones to the bitmap. The
+;external hardware will get in there and put the Pattern Register's data
+;into the bitmap.
+;
+extrn   gbmod:byte,curl0:byte,curl1:byte,curl2:byte,xinit:word,yinit:word
+extrn   fifo_empty:near,dc:word,d:word,d2:word,d1:word,dm:word,dir:word
+dseg    segment byte    public  'datasg'
+        public  radius,xad,yad
+xad     dw      0
+yad     dw      0
+radius  dw      0
+dseg    ends
+cseg    segment byte    public  'codesg'
+        public  circle
+        assume  cs:cseg,ds:dseg,es:dseg,ss:nothing
+circle  proc    near
+        call    fifo_empty
+        mov     al,78h
+        out     57h,al                  ;set pram bytes 8 and 9
+        mov     al,0ffh
+        out     56h,al
+        out     56h,al
+        mov     word ptr d1,-1          ;set FIGS D1 parameter
+        mov     word ptr dm,0           ;set FIGS D2 parameter
+        mov     bx,word ptr radius      ;get radius
+        mov     ax,0b505h               ;get 1/1.41
+        inc     bx
+        mul     bx
+        mov     word ptr dc,dx          ;set FIGS DC parameter
+        dec     bx
+        mov     word ptr d,bx           ;set FIGS D parameter
+        shl     bx,1
+        mov     word ptr d2,bx          ;set FIGS D2 parameter
+        mov     ax,word ptr xinit       ;get center x
+        mov     word ptr xad,ax         ;save it
+        mov     ax,word ptr yinit       ;get center y
+        sub     ax,word ptr radius      ;subtract radius
+        mov     word ptr yad,ax         ;save it
+        call    acvt                    ;position cursor
+        mov     byte ptr dir,01h        ;arc 1
+        call    avdo                    ;draw it
+        call    acvt                    ;position cursor
+        mov     byte ptr dir,06h        ;arc 6
+        call    avdo                    ;draw it
+        mov     ax,word ptr xinit       ;get center x
+        mov     word ptr xad,ax         ;save it
+        mov     ax,word ptr yinit       ;get center y
+        add     ax,word ptr radius      ;add in radius
+        mov     word ptr yad,ax         ;save it
+        call    acvt                    ;position cursor
+        mov     byte ptr dir,02h        ;arc 2
+        call    avdo                    ;draw it
+        call    acvt                    ;position cursor
+        mov     byte ptr dir,05h        ;arc 5
+        call    avdo                    ;draw it
+        mov     ax,word ptr xinit       ;get center x
+        sub     ax,word ptr radius      ;subtract radius
+        mov     word ptr xad,ax         ;save it
+        mov     ax,word ptr yinit       ;get center y
+        mov     word ptr yad,ax         ;save it
+        call    acvt                    ;position cursor
+        mov     byte ptr dir,03h        ;arc 3
+        call    avdo                    ;draw it
+        call    acvt                    ;position cursor
+        mov     byte ptr dir,00h        ;arc 0
+        call    avdo                    ;draw it
+        mov     ax,word ptr xinit       ;get center x
+        add     ax,word ptr radius      ;add in the radius
+        mov     word ptr xad,ax         ;save it
+        mov     ax,word ptr yinit       ;get center y
+        mov     word ptr yad, ax        ;save it
+        call    acvt                    ;position cursor
+        mov     byte ptr dir,07h        ;arc 7
+        call    avdo                    ;draw it
+        call    acvt                    ;position cursor
+        mov     byte ptr dir,04h        ;arc 4
+        call    avdo                    ;draw it
+        ret
+;
+;Convert the starting x,y coordinate pair into a cursor position word value.
+;
+acvt:
+        mov     al,gbmod        ;are we in low resolution mode?
+        test    al,01
+        jz      av1             ;jump if yes
+        mov     cl,06           ;use 64 words per line as a divisor
+        jmp     av2
+av1:    mov     cl,05           ;use 32 words per line as a divisor
+av2:    xor     dx,dx           ;set up for 32bit/16bit math by 
+        mov     ax,word ptr yad    ;clearing upper 16 bits
+        shl     ax,cl
+        mov     bx,ax           ;save lines*words per line
+        mov     ax,word ptr xad    ;compute no. of extra words on last line
+        mov     cx,16           ;16 bits per word
+        div     cx              ;ax now has number of extra words to add in
+        add     ax,bx           ;dx has the less than 16 dot address left over
+        mov     curl0,al        ;this results in the new cursor memory address
+        mov     curl1,ah
+        mov     cl,04           ;dot address is high nibble of byte 
+        shl     dl,cl           ;
+        mov     curl2,dl
+        mov     al,49h          ;set cursor location to that in curl0,1,2
+        out     57h,al          ;issue the GDC cursor location command
+        mov     al,curl0        ;fetch word low address
+        out     56h,al
+        mov     al,curl1        ;word middle address
+        out     56h,al
+        mov     al,curl2        ;dot address (top 4 bits) and high word addr
+        out     56h,al
+        ret
+avdo:   call    fifo_empty
+        mov     al,4ch          ;issue the FIGS command
+        out     57h,al
+        mov     al,020h         ;construct P1 of FIGS command
+        or      al,byte ptr dir
+        out     56h,al          ;issue a parameter byte
+        mov     si,offset dc
+        mov     cx,10           ;issue the 10 bytes of DC,D,D2,D1
+avdo1:  mov     al,[si]         ;fetch byte
+        out     56h,al          ;issue to the GDC
+        inc     si              ;point to next in list
+        loop    avdo1           ;loop until all 10 done
+        mov     al,6ch          ;start the drawing process in motion
+        out     57h,al          ;by issuing FIGD command
+        ret
+circle  endp
+cseg    ends
+        end
+
+
