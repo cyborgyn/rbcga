@@ -21,7 +21,7 @@ GDC_CMD_CCHAR:	equ 0x48		; Cursor & Character characteristics, 3 params
 ;		2-0b: blinking rate upper 3 bits
 
 GDC_CMD_BLANK:	equ 0x0c		; Blank display
-GDC_CMD_NOBLANK:equ 0x0d		; Show display
+GDC_CMD_NOBLANK: equ 0x0d		; Show display
 
 GDC_CMD_CURS:	equ 0x49		; Cursor setup, ? params
 GDC_CMD_MASK:	equ 0x4a		; Load Mask register, 2 params

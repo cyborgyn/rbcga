@@ -87,30 +87,30 @@ start:
 	cli
 	xor		ax,ax				; Save the old IRQ vector
 	mov		es,ax
-	mov		byte ptr irq_handled,al
+	mov		byte [irq_handled],al
 	mov		bx,GDC_IRQ_ADDR
-	mov		cx,word ptr es:[bx]
+	es mov	cx,word [bx]
 	push	cx
-	mov		cx,word ptr es:[bx+2]
+	es mov	cx,word [bx+2]
 	push	cx
 	
 	mov		cx,cs				; Write our new, wait IRQ handler
-	mov		word ptr es:[bx],cx
+	es mov	word [bx],cx
 	mov		cx,wait_irq_handler
-	mov		word ptr es:[bx+2],cx
+	es mov	word [bx+2],cx
 	
 	mov 	cx,8000				; time-out after 8000 cycles
 	sti
 .do_wait:
-	mov		al,byte ptr irq_handled
+	mov		al,byte [irq_handled]
 	cmp		al,0xff
 	jz		.irq_handled
 	loop	.do_wait
 .irq_handled:
 	pop		cx
-	mov		word ptr es:[bx+2],cx
+	es mov	word [bx+2],cx
 	pop 	cx
-	mov		word ptr es:[bx],cx
+	es mov	word [bx],cx
 	xor 	cx,cx
 	jmp		.cont_setup
 
@@ -143,7 +143,7 @@ start:
 
 
 wait_irq_handler:
-	mov		byte ptr irq_handled,0xff
+	cs mov	byte [irq_handled],0xff
 	iret
 irq_handled:
 	db 0
