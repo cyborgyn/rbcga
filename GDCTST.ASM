@@ -5,6 +5,7 @@
     use16
     cpu 8086
     org 0x100
+%include "GDC.INC"
 start:
 ;-------------------------------
 ; Load picture
@@ -59,9 +60,64 @@ start:
 ;-------------------------------
 ; Setup screen
 ;-------------------------------
+	cld
+	mov		si,screen
+	xor		cx,cx
+	xor		dx,dx
+.cont_setup:
+	lodsb
+	cmp		al,0
+	jz		.screen_ready
+	cmp		al,0xff
+	jz		.wait_vrt
+	mov		cl,al
+	lodsb
+	mov		dl,al
+.rep_out:
+	lodsb
+	out		dx,al
+	loop	.rep_out
+	jmp		.cont_setup
 
-    ; TODO: setup screen
+;-------------------------------
+; Wait for vertical retrace
+; Used during screen setup
+;-------------------------------
+.wait_vrt:						; Wait a vertical retrace IRQ
+	cli
+	xor		ax,ax				; Save the old IRQ vector
+	mov		es,ax
+	mov		byte ptr irq_handled,al
+	mov		bx,GDC_IRQ_ADDR
+	mov		cx,word ptr es:[bx]
+	push	cx
+	mov		cx,word ptr es:[bx+2]
+	push	cx
+	
+	mov		cx,cs				; Write our new, wait IRQ handler
+	mov		word ptr es:[bx],cx
+	mov		cx,wait_irq_handler
+	mov		word ptr es:[bx+2],cx
+	
+	mov 	cx,8000				; time-out after 8000 cycles
+	sti
+.do_wait:
+	mov		al,byte ptr irq_handled
+	cmp		al,0xff
+	jz		.irq_handled
+	loop	.do_wait
+.irq_handled:
+	pop		cx
+	mov		word ptr es:[bx+2],cx
+	pop 	cx
+	mov		word ptr es:[bx],cx
+	xor 	cx,cx
+	jmp		.cont_setup
 
+;-------------------------------
+; Copy picture to framebuffer
+;-------------------------------
+.screen_ready:
     ; TODO: copy picture to framebuffer
 
 ;-------------------------------
@@ -84,6 +140,59 @@ start:
     int     0x10
     mov     ax,0x4C00           ; Exit to DOS
     int     0x21
+
+
+wait_irq_handler:
+	mov		byte ptr irq_handled,0xff
+	iret
+irq_handled:
+	db 0
+
+screen:
+	db 1, GDCP_FIFO_CMD, GDC_CMD_RESET
+	; Mode, words/line-2, HSync+VSync, VSync+HFrontPorch, HBackPorch, 
+	; VFrontPorch, Active lines, AltiveLines + VBackPorch
+	; 800x240
+	db 8, GDCP_FIFO_PAR, 0x12, 0x30, 0x64, 0x08, 0x03, 0x03, 0xf0, 0x40
+	; The pitch (RAM line width) is 64 words
+	db 1, GDCP_FIFO_CMD, GDC_CMD_PITCH
+	db 1, GDCP_FIFO_PAR, 0x40
+	; Set GDC mode
+	db 1, GDCP_IND_ADDR, GDCIR_MODE
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_PLANE0 | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_BLANK
+	; Start display
+	db 1, GDCP_FIFO_CMD, GDC_CMD_START
+	; Set zoom to none
+	db 1, GDCP_FIFO_CMD, GDC_CMD_ZOOM
+	db 1, GDCP_FIFO_PAR, 0
+	; Set write memory to reset to 0
+	db 1, GDCP_FIFO_CMD, GDC_CMD_WDAT | D_RESET0 | D_WORD
+	; Setup PRAM... for what???
+	db 1, GDCP_FIFO_CMD, GDC_CMD_PRAM | 0
+	db 4, GDCP_FIFO_PAR, 0x00, 0x00, 0xff, 0x0f
+	db 1, GDCP_FIFO_CMD, GDC_CMD_PRAM | 8
+	db 2, GDCP_FIFO_PAR, 0xff, 0xff
+	; Setup cursor (hide it)
+	db 1, GDCP_FIFO_CMD, GDC_CMD_CCHAR
+	db 3, GDCP_FIFO_PAR, 0x00, 0x00, 0x00
+	; Set vsync to generate (master mode)
+	db 1, GDCP_FIFO_CMD, GDC_CMD_VSYNC | SYNC_MASTER
+	db 1, GDCP_RESET, 0x00
+	; Enable IRQ
+	db 1, GDCP_IND_ADDR, GDCIR_MODE
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_PLANE0 | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_BLANK
+	db 0xff		; Wait for vertical retrace IRQ
+	; Disable IRQ
+	db 1, GDCP_IND_ADDR, GDCIR_MODE
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_PLANE0 | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_BLANK
+	
+	; TODO: Load color map
+	; TODO: load scroll map
+	; TODO: Initialize pattern & pattern multiply
+	; TODO: set foreground & background colors
+	; TODO: enable plane 0-3 replace logic
+	db 1, GDCP_FIFO_CMD, GDC_CMD_NOBLANK
+	db 0
 
 filename:
     db "rainbow.raw",0

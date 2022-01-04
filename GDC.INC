@@ -1,7 +1,64 @@
 ;-----------------------------------------------------------
 ; NEC 7220 GDC defines
 ;-----------------------------------------------------------
+GDC_CMD_RESET:	equ 0x00		; Reset command, 8 params
+GDC_CMD_SYNC:	equ 0xfe		; Sync setup command, 8 params
+; 0.bit: DE??
 
+GDC_CMD_VSYNC:	equ 0x6e		; VSync setup command
+; 0. bit: 1 if master mode
+SYNC_MASTER:	equ 0x01
+SYNC_SLAVE:		equ 0x00
+
+GDC_CMD_CCHAR:	equ 0x48		; Cursor & Character characteristics, 3 params
+; p1 = 	7b	: display cursor if 1
+;		6-5b= 0
+;		4-0b: lines/char row - 1
+; p2 = 	7-6b: blinking rate lower 2 bits
+;		5b	: blinking cursor if 1
+;		4-0b: cursor top line number in the row
+; p3 = 	7-3b: cursor bottom line number in the row
+;		2-0b: blinking rate upper 3 bits
+
+GDC_CMD_BLANK:	equ 0x0c		; Blank display
+GDC_CMD_NOBLANK:equ 0x0d		; Show display
+
+GDC_CMD_CURS:	equ 0x49		; Cursor setup, ? params
+GDC_CMD_MASK:	equ 0x4a		; Load Mask register, 2 params
+; p1 = low byte
+; p2 = hi byte
+
+GDC_CMD_FIGS:	equ 0x4c		; Figure Setup, 1-11 params
+; TODO: p1, p2-p11
+
+GDC_CMD_FIGD:	equ 0x6c		; Figure Draw (start set up figure drawing)
+GDC_CMD_GCHRD:	equ 0x68		; Graphics char draw / area filling start
+GDC_CMD_CURD:	equ 0xe0		; Cursor address read
+GDC_CMD_LPRD:	equ 0xc0		; Light Pen address read
+
+GDC_CMD_PITCH:	equ 0x47		; Pitch command, 1 param
+; p1 = number of word in RAM for a single line
+
+GDC_CMD_START:	equ 0x6b		; End idle mode, start display
+
+GDC_CMD_ZOOM:	equ 0x00		; Zoom command, 1 param
+; p1 =  7-4b: display zoom factor
+;		3-0b: graphics & char writing zoom factor
+
+GDC_CMD_RDAT:	equ 0xa0		; Read data from display memory
+; The same type and mod subfields as WDAT
+GDC_CMD_WDAT:	equ 0x20		; Write data into display memory
+; command flags (can be ORed with command):
+D_REPLACE:		equ 0x00
+D_COMPLEMENT:	equ 0x01
+D_RESET0:		equ 0x10
+D_RESET1:		equ 0x11
+D_WORD:			equ 0x00 << 3
+D_LOWBYTE:		equ 0x10 << 3
+D_HIBYTE:		equ 0x11 << 3
+
+GDC_CMD_PRAM:	equ 0x70		; PRAM load, 1-16 params
+; lower nible is the PRAM start address (0-16)
 
 
 ; - PRAM:
