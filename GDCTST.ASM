@@ -115,12 +115,103 @@ start:
 	xor 	cx,cx
 	jmp		.cont_setup
 
+	; One line == 80 bytes == 40 words
+	; One line in GDC mem == 128 bytes == 64 words
+	; Line feed == two GDC memory lines
+linefeed:	equ 64+64
 ;-------------------------------
 ; Copy picture to framebuffer
 ;-------------------------------
 .screen_ready:
-    ; TODO: copy picture to framebuffer
+	; Setup GDC for plane 0 unfiltered writes
+	
+	mov		al,GDCIR_FBG		; Select Foreground/Background indirect register
+	out		GDCP_IND_ADDR,al
+	mov		al,0x0f				; Inverted foreground & background
+	out		GDCP_IND_DATA,al
+	
+	mov		al,GDCIR_ALUPS		; Select ALU/PS register
+	out		GDCP_IND_ADDR,al
+	mov		al,0x0e				; Write to plane 0 only, replace mode
+	out		GDCP_IND_DATA,al
+	
+	; Initial Cursor position, for centering 640x200 image on 800x240
+	mov		di,20*64+12			; 20 lines skipped, shifted right by 12 words
+	; Initialize a few registers
+	xor		cx,cx				; We need CH=00
+	mov 	dx,GDCP_PRAM		; we will use it in the loop as out port
+	
+	; First copy even lines, from BA00:0000
+	; All 8000 bytes are packed next to each other
+	; starting from DS:SI
+	mov		ax,cs
+	add		ax,cgapic2
+.nextPlane:
+	mov		ds,ax
+	
+	xor		ax,ax
+	mov		si,ax
+	; we have 100 lines
+	mov		cl,100
+.nextLine:
+	push	cx					; 
+	
+	; Write DI to GDC Cursor Position
+	mov		al,GDC_CMD_CURS
+	out		GDCP_FIFO_CMD
+	mov		ax,di
+	out		GDCP_FIFO_PAR,al
+	mov		al,ah
+	out		GDCP_FIFO_PAR,al
+	
+	; each line is 80 (5x16) bytes long
+	mov		cl,5
+.nextBytesInLine:
+	push	cx					; 
+	mov		cl,8				; We write 16 bytes (8 words) at once in the write buffer
+.nextBytes:
+	lodsw
+	out		dx,al
+	mov		al,ah
+	out		dx,al
+	loop	.nextBytes
+	
+	; Command the GDC to write from Write Buffer
+	mov		al,GDC_CMD_FIGS
+	out		GDCP_FIFO_CMD,al
+	mov		al,2				; Direction 2, WDAT will come
+	out		GDCP_FIFO_PAR,al
+	mov		al,7				; 8 words waiting in Write Buffer
+	out		GDCP_FIFO_PAR,al
+	mov		al,0
+	out		GDCP_FIFO_PAR,al
+	
+	mov		al,GDC_CMD_WDAT | D_REPLACE | D_WORD
+	out		GDCP_FIFO_CMD,al	; Start the write
+	mov		al,0xff				; Set write mask, only LSB is used anyways...
+	out		GDCP_FIFO_PAR,al
+	out		GDCP_FIFO_PAR,al
+	
+	pop		cx
+	loop	.nextBytesInLine
+	
+	
+	add		di,linefeed			; Skip unused bytes in GDC RAM, and position to next*2 line
+	
+	pop		cx
+	loop	.nextLine
+	
+	; Self modifying code, to next time: jmp .picture_ready
+	cs mov	word [$ - 1],0xeb + ((.picture_ready - $ - 1) << 8)
+	
+	; We need the odd lines as well, starting from B800:0000
+	mov 	di,21*64+12			; We will draw to odd lines in GDC memory @ word address
+	mov		ax,cs
+	add		ax,cgapic1
+	jmp		.nextPlane
 
+.picture_ready:
+	
 ;-------------------------------
 ; Wait for key stroke
 ;-------------------------------

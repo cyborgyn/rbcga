@@ -23,7 +23,12 @@ GDC_CMD_CCHAR:	equ 0x48		; Cursor & Character characteristics, 3 params
 GDC_CMD_BLANK:	equ 0x0c		; Blank display
 GDC_CMD_NOBLANK: equ 0x0d		; Show display
 
-GDC_CMD_CURS:	equ 0x49		; Cursor setup, ? params
+GDC_CMD_CURS:	equ 0x49		; Cursor setup, 2-3 params
+; p1 = low byte Word Address
+; p2 = mid byte Word Address
+; p3 =	7-4b: dot address within word
+;		1-0b: top bits of Word Address
+
 GDC_CMD_MASK:	equ 0x4a		; Load Mask register, 2 params
 ; p1 = low byte
 ; p2 = hi byte
