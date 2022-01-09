@@ -173,7 +173,11 @@ screen_ready:
 .wait_gdc_ready:
 	in      al,GDCP_STATUS		; read the GDC status
 	test    al,4           		; FIFO empty bit set?
-	jnz     .wait_gdc_ready    	; wait if not.
+	jz      .wait_gdc_ready    	; wait if not.
+	
+	mov 	al,GDCIR_PRAM
+	out		GDCP_IND_ADDR,al
+	out 	GDCP_IND_DATA,al
 	
 .nextBytes:
 	lodsw
@@ -208,7 +212,7 @@ screen_ready:
 	loop	.nextLine
 	
 	; Self modifying code, to next time: jmp .picture_ready
-	cs mov	word [$ - 1],0xeb + ((.picture_ready - $ - 1) << 8)
+	cs mov	word [$],0xeb + ((.picture_ready - $) << 8)
 	
 	; We need the odd lines as well, starting from B800:0000
 	mov 	di,21*64+12			; We will draw to odd lines in GDC memory @ word address
