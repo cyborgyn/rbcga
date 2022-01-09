@@ -66,10 +66,10 @@ start:
 	xor		dx,dx
 .cont_setup:
 	lodsb
-	cmp		al,0
-	jz		.screen_ready
 	cmp		al,0xff
 	jz		.wait_vrt
+	cmp		al,0
+	jz		screen_ready
 	mov		cl,al
 	lodsb
 	mov		dl,al
@@ -122,7 +122,7 @@ linefeed:	equ 64+64
 ;-------------------------------
 ; Copy picture to framebuffer
 ;-------------------------------
-.screen_ready:
+screen_ready:
 	; Setup GDC for plane 0 unfiltered writes
 	
 	mov		al,GDCIR_FBG		; Select Foreground/Background indirect register
@@ -158,7 +158,7 @@ linefeed:	equ 64+64
 	
 	; Write DI to GDC Cursor Position
 	mov		al,GDC_CMD_CURS
-	out		GDCP_FIFO_CMD
+	out		GDCP_FIFO_CMD,al
 	mov		ax,di
 	out		GDCP_FIFO_PAR,al
 	mov		al,ah
