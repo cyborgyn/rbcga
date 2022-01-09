@@ -133,12 +133,10 @@ start:
 ;-------------------------------
 ; Reset char screen, and exit
 ;-------------------------------
-    mov     ax,0x0003           ; CGA 80x25 color mode
-    int     0x10
-    mov     ah,0x02             ; Set cursor position
-    mov     bh,0x00
-    mov     dx,0x0000           ; row,col = 0
-    int     0x10
+	mov		al,GDC_CMD_BLANK
+	out		GDCP_FIFO_CMD,al
+	mov		al,0x83
+	out		0x0a,al
     mov     ax,0x4C00           ; Exit to DOS
     int     0x21
 
@@ -167,6 +165,7 @@ screen:
 	db 1, GDCP_FIFO_CMD, GDC_CMD_ZOOM
 	db 1, GDCP_FIFO_PAR, 0
 	; Set write memory to reset to 0
+	; Reset to 1 and Reset to 0 doesn't require parameter
 	db 1, GDCP_FIFO_CMD, GDC_CMD_WDAT | D_RESET0 | D_WORD
 	; Setup PRAM... for what???
 	db 1, GDCP_FIFO_CMD, GDC_CMD_PRAM | 0
@@ -272,6 +271,8 @@ screen:
 	db 1, GDCP_IND_DATA, 0
 	
 	db 1, GDCP_FIFO_CMD, GDC_CMD_NOBLANK
+	; Switch to Graphics Option card
+	db 1, 0x0a, 0x87
 	db 0
 
 filename:
