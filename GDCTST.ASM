@@ -169,6 +169,12 @@ linefeed:	equ 64+64
 .nextBytesInLine:
 	push	cx					; 
 	mov		cl,8				; We write 16 bytes (8 words) at once in the write buffer
+
+.wait_gdc_ready:
+	in      al,GDCP_STATUS		; read the GDC status
+	test    al,4           		; FIFO empty bit set?
+	jnz     .wait_gdc_ready    	; wait if not.
+	
 .nextBytes:
 	lodsw
 	out		dx,al

@@ -91,6 +91,7 @@ GDCP_WMASK_H:   equ 0x55
 
 GDCP_FIFO_CMD:  equ 0x57
 GDCP_FIFO_PAR:  equ 0x56        ; Both these ports write to FIFO
+GDCP_STATUS:	equ 0x56		; When red, it's the GDC status
 
 ; Flags for GDCP_IND_ADDR
 ; After selecting indirect address, one can write to
