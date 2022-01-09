@@ -212,7 +212,7 @@ screen_ready:
 	loop	.nextLine
 	
 	; Self modifying code, to next time: jmp .picture_ready
-	cs mov	word [$],0xeb + ((.picture_ready - $) << 8)
+	cs mov	word [$],0xeb + ((.picture_ready - $ - 2) << 8)
 	
 	; We need the odd lines as well, starting from B800:0000
 	mov 	di,21*64+12			; We will draw to odd lines in GDC memory @ word address
