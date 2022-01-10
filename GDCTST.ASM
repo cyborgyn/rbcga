@@ -191,7 +191,7 @@ screen_ready:
 	out		GDCP_FIFO_PAR,al
 	
 	; each line is 80 (5x16) bytes long
-	mov		cl,(80-4)/4
+	mov		cl,(80-2)/2
 
 	; Prepare the GDC to write from Write Buffer
 	mov		ax,0x0200+GDC_CMD_FIGS	; # 4 |
@@ -204,15 +204,40 @@ screen_ready:
 	out		GDCP_FIFO_PAR,al    ; #14 |
 	                            ; =68 cycles
 	
-	lodsw                       ; Write 4 initial bytes to Write Buffer
+	lodsw                       ; Write 16 initial bytes to Write Buffer
 	out		dx,al               ; #21 / byte = 336 Cycles
 	mov		al,ah
 	out		dx,al
-	lodsw
+	lodsw                       ; Write 16 initial bytes to Write Buffer
+	out		dx,al               ; #21 / byte = 336 Cycles
+	mov		al,ah
 	out		dx,al
+	lodsw                       ; Write 16 initial bytes to Write Buffer
+	out		dx,al               ; #21 / byte = 336 Cycles
+	mov		al,ah
+	out		dx,al
+	lodsw                       ; Write 16 initial bytes to Write Buffer
+	out		dx,al               ; #21 / byte = 336 Cycles
+	mov		al,ah
+	out		dx,al
+	lodsw                       ; Write 16 initial bytes to Write Buffer
+	out		dx,al               ; #21 / byte = 336 Cycles
+	mov		al,ah
+	out		dx,al
+	lodsw                       ; Write 16 initial bytes to Write Buffer
+	out		dx,al               ; #21 / byte = 336 Cycles
+	mov		al,ah
+	out		dx,al
+	lodsw                       ; Write 16 initial bytes to Write Buffer
+	out		dx,al               ; #21 / byte = 336 Cycles
+	mov		al,ah
+	out		dx,al
+	lodsw                       ; Write 16 initial bytes to Write Buffer
+	out		dx,al               ; #21 / byte = 336 Cycles
 	mov		al,ah
 	out		dx,al
 	
+	cli
 	out 	GDCP_IND_DATA,al	; Reset WriteBuffer counter
 	mov		ax,GDC_CMD_WDAT | D_REPLACE | D_WORD +0xff00	; # 4 |
 	out		GDCP_FIFO_CMD,al	; #14 | Start the write
@@ -221,19 +246,12 @@ screen_ready:
 	out		GDCP_FIFO_PAR,al    ; #14 |
 	                            ; =48 cycles
 .nextBytesInLine:
-	lodsw						; #16
-	out		dx,al				; #12
-	mov		al,ah				; # 2
-	out		dx,al				; #12
-	
-	lodsw						; #16
-	out		dx,al				; #12
-	mov		al,ah				; # 2
-	out		dx,al				; #12
+	nop
+	nop
 	out 	GDCP_IND_DATA,al	; #14 | Reset WriteBuffer counter
-	
 	loop	.nextBytesInLine    ; #17 |
 	                            ; =469 cycles / 16 bytes (overhead = 133) -> 2345 cycles / line
+	sti
 	add		di,linefeed			; Skip unused bytes in GDC RAM, and position to next*2 line
 	
 	pop		cx
