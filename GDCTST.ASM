@@ -118,7 +118,6 @@ start:
 	; One line == 80 bytes == 40 words
 	; One line in GDC mem == 128 bytes == 64 words
 	; Line feed == two GDC memory lines
-linefeed:	equ 64+64
 screen_ready:
 ;-------------------------------
 ; Wait for key stroke
@@ -167,7 +166,7 @@ screen_ready:
 	
 	xor		ax,ax
 	mov		di,ax
-	mov 	si,0x0200			; odd lines
+	mov 	si,0x2000			; odd lines
 	; we have 200 lines, interlaced in SI,DI,SI,DI, etc...
 	mov		cl,200
 .nextLine:
@@ -281,7 +280,7 @@ screen:
 	db 8, GDCP_FIFO_PAR, 0x02, 0x26, 0x24, 0x1e, 0x07, 0x08, 0xc7, 0x38
 	; The pitch (RAM line width) is 40 words = 640 pixels
 	db 1, GDCP_FIFO_CMD, GDC_CMD_PITCH
-	db 1, GDCP_FIFO_PAR, 0x40
+	db 1, GDCP_FIFO_PAR, 0x28
 	; Set GDC mode
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
 	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_PLANE0 | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_BLANK
