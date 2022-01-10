@@ -118,7 +118,6 @@ start:
 	; One line == 80 bytes == 40 words
 	; One line in GDC mem == 128 bytes == 64 words
 	; Line feed == two GDC memory lines
-linefeed:	equ 64+64
 screen_ready:
 ;-------------------------------
 ; Wait for key stroke
@@ -133,6 +132,12 @@ screen_ready:
 ; Copy picture to framebuffer
 ;-------------------------------
 	; Setup GDC for plane 0 unfiltered writes
+	; Reset GDC Cursor Position to 0,0
+	mov		al,GDC_CMD_CURS
+	out		GDCP_FIFO_CMD,al
+	xor		ax,ax
+	out		GDCP_FIFO_PAR,al
+	out		GDCP_FIFO_PAR,al
 	
 	mov		al,GDCIR_FBG		; Select Foreground/Background indirect register
 	out		GDCP_IND_ADDR,al
@@ -148,8 +153,6 @@ screen_ready:
 	out		GDCP_IND_ADDR,al
 	out 	GDCP_IND_DATA,al
 	
-	; Initial Cursor position, for centering 640x200 image on 800x240
-	mov		di,20*64+5			; 20 lines skipped, shifted right by 5 words
 	; Initialize a few registers
 	xor		cx,cx				; We need CH=00
 	mov 	dx,GDCP_PRAM		; We will use it in the loop as out port
@@ -159,13 +162,13 @@ screen_ready:
 	; starting from DS:SI
 	mov		ax,cs
 	add		ax,cgapic1
-.nextPlane:
 	mov		ds,ax
 	
 	xor		ax,ax
-	mov		si,ax
-	; we have 100 lines
-	mov		cl,100
+	mov		di,ax
+	mov 	si,0x2000			; odd lines
+	; we have 200 lines, interlaced in SI,DI,SI,DI, etc...
+	mov		cl,200
 .nextLine:
 	push	cx					; 
 	
@@ -178,14 +181,9 @@ screen_ready:
 	test    al,0x04		        ; FIFO empty & Vertical sync bit set?
 	jz      .wait_gdc_ready    	; wait if not.
 .dontWait:
-
-	; Write DI to GDC Cursor Position
-	mov		al,GDC_CMD_CURS
-	out		GDCP_FIFO_CMD,al
-	mov		ax,di
-	out		GDCP_FIFO_PAR,al
-	mov		al,ah
-	out		GDCP_FIFO_PAR,al
+	
+	; We gained 50+ cycles by eliminating cursor positioning in GDC
+	xchg	si,di				; # 4 | Continue with the odd/even other lines
 	
 	; each line is 80 (5x16) bytes long
 	mov		cl,5
@@ -243,20 +241,9 @@ screen_ready:
 	                            ; =48 cycles
 	loop	.nextBytesInLine    ; #17 |
 	                            ; =469 cycles / 16 bytes (overhead = 133) -> 2345 cycles / line
-	add		di,linefeed			; Skip unused bytes in GDC RAM, and position to next*2 line
-	
 	pop		cx
 	loop	.nextLine
 	
-	; Self modifying code, to next time: jmp .picture_ready
-	cs mov	word [$],0xeb + ((picture_ready - $ - 2) << 8)
-	
-	; We need the odd lines as well, starting from B800:0000
-	mov 	di,21*64+5			; We will draw to odd lines in GDC memory @ word address
-	mov		ax,cs
-	add		ax,cgapic2
-	jmp		.nextPlane
-
 picture_ready:
 	
 ;-------------------------------
@@ -289,11 +276,11 @@ screen:
 	db 1, GDCP_FIFO_CMD, GDC_CMD_RESET
 	; Mode, words/line-2, HSync+VSync, VSync+HFrontPorch, HBackPorch, 
 	; VFrontPorch, Active lines, AltiveLines + VBackPorch
-	; 800x240
-	db 8, GDCP_FIFO_PAR, 0x02, 0x30, 0x64, 0x08, 0x03, 0x03, 0xf0, 0x40
-	; The pitch (RAM line width) is 64 words
+	; 640x200
+	db 8, GDCP_FIFO_PAR, 0x02, 0x26, 0x24, 0x1e, 0x07, 0x08, 0xc7, 0x38
+	; The pitch (RAM line width) is 40 words = 640 pixels
 	db 1, GDCP_FIFO_CMD, GDC_CMD_PITCH
-	db 1, GDCP_FIFO_PAR, 0x40
+	db 1, GDCP_FIFO_PAR, 0x28
 	; Set GDC mode
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
 	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_PLANE0 | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_BLANK
