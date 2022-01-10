@@ -166,6 +166,9 @@ screen_ready:
 	mov		si,ax
 	; we have 100 lines
 	mov		cl,100
+	
+	mov 	al,GDCIR_PRAM
+	out		GDCP_IND_ADDR, al
 .nextLine:
 	push	cx					; 
 	
@@ -188,21 +191,20 @@ screen_ready:
 	out		GDCP_FIFO_PAR,al
 	
 	; each line is 80 (5x16) bytes long
-	mov		cl,5
-.nextBytesInLine:
+	mov		cl,(80-4)/4
 
 	; Prepare the GDC to write from Write Buffer
 	mov		ax,0x0200+GDC_CMD_FIGS	; # 4 |
 	out		GDCP_FIFO_CMD,al    ; #14 |
 	mov		al,ah				; # 2 | Direction 2, WDAT will come
 	out		GDCP_FIFO_PAR,al    ; #14 |
-	mov		ax,7				; # 4 | 8 words waiting in Write Buffer
-	out		GDCP_FIFO_PAR,al    ; #14 |
-	mov		al,ah               ; # 2 |
+	mov		ax,39				; # 4 | 40 words waiting in Write Buffer
+	out		GDCP_FIFO_PAR,al    ; #14 | ... sort of...
+	mov		al,ah               ; # 2 | ... we will fill, while it copies
 	out		GDCP_FIFO_PAR,al    ; #14 |
 	                            ; =68 cycles
 	
-	lodsw                       ; Write 16 bytes to Write Buffer
+	lodsw                       ; Write 4 initial bytes to Write Buffer
 	out		dx,al               ; #21 / byte = 336 Cycles
 	mov		al,ah
 	out		dx,al
@@ -210,37 +212,26 @@ screen_ready:
 	out		dx,al
 	mov		al,ah
 	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
 	
+	out 	GDCP_IND_DATA,al	; Reset WriteBuffer counter
 	mov		ax,GDC_CMD_WDAT | D_REPLACE | D_WORD +0xff00	; # 4 |
 	out		GDCP_FIFO_CMD,al	; #14 | Start the write
 	mov		al,ah				; # 2 | Set write mask, only LSB is used anyways...
 	out		GDCP_FIFO_PAR,al    ; #14 |
 	out		GDCP_FIFO_PAR,al    ; #14 |
 	                            ; =48 cycles
+.nextBytesInLine:
+	lodsw						; #16
+	out		dx,al				; #12
+	mov		al,ah				; # 2
+	out		dx,al				; #12
+	
+	lodsw						; #16
+	out		dx,al				; #12
+	mov		al,ah				; # 2
+	out		dx,al				; #12
+	out 	GDCP_IND_DATA,al	; #14 | Reset WriteBuffer counter
+	
 	loop	.nextBytesInLine    ; #17 |
 	                            ; =469 cycles / 16 bytes (overhead = 133) -> 2345 cycles / line
 	add		di,linefeed			; Skip unused bytes in GDC RAM, and position to next*2 line
