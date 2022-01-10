@@ -119,10 +119,19 @@ start:
 	; One line in GDC mem == 128 bytes == 64 words
 	; Line feed == two GDC memory lines
 linefeed:	equ 64+64
+screen_ready:
+;-------------------------------
+; Wait for key stroke
+;-------------------------------
+.waitkey:
+    mov     ah,0x06             ; Console function
+    mov     dl,0xff             ; read char
+    int     0x21
+    jz      .waitkey
+
 ;-------------------------------
 ; Copy picture to framebuffer
 ;-------------------------------
-screen_ready:
 	; Setup GDC for plane 0 unfiltered writes
 	
 	mov		al,GDCIR_FBG		; Select Foreground/Background indirect register
@@ -136,7 +145,7 @@ screen_ready:
 	out		GDCP_IND_DATA,al
 	
 	; Initial Cursor position, for centering 640x200 image on 800x240
-	mov		di,20*64+12			; 20 lines skipped, shifted right by 12 words
+	mov		di,20*64+5			; 20 lines skipped, shifted right by 5 words
 	; Initialize a few registers
 	xor		cx,cx				; We need CH=00
 	mov 	dx,GDCP_PRAM		; we will use it in the loop as out port
@@ -145,7 +154,7 @@ screen_ready:
 	; All 8000 bytes are packed next to each other
 	; starting from DS:SI
 	mov		ax,cs
-	add		ax,cgapic2
+	add		ax,cgapic1
 .nextPlane:
 	mov		ds,ax
 	
@@ -172,7 +181,9 @@ screen_ready:
 
 .wait_gdc_ready:
 	in      al,GDCP_STATUS		; read the GDC status
-	test    al,4           		; FIFO empty bit set?
+	test    al,0x04		        ; FIFO empty & Vertical sync bit set?
+	jz      .wait_gdc_ready    	; wait if not.
+	test    al,0x20
 	jz      .wait_gdc_ready    	; wait if not.
 	
 	mov 	al,GDCIR_PRAM
@@ -196,7 +207,8 @@ screen_ready:
 	mov		al,0
 	out		GDCP_FIFO_PAR,al
 	
-	mov		al,GDC_CMD_WDAT | D_REPLACE | D_WORD
+	;mov		al,GDC_CMD_WDAT | D_REPLACE | D_WORD
+	mov		al,0x22
 	out		GDCP_FIFO_CMD,al	; Start the write
 	mov		al,0xff				; Set write mask, only LSB is used anyways...
 	out		GDCP_FIFO_PAR,al
@@ -212,15 +224,15 @@ screen_ready:
 	loop	.nextLine
 	
 	; Self modifying code, to next time: jmp .picture_ready
-	cs mov	word [$],0xeb + ((.picture_ready - $ - 2) << 8)
+	cs mov	word [$],0xeb + ((picture_ready - $ - 2) << 8)
 	
 	; We need the odd lines as well, starting from B800:0000
-	mov 	di,21*64+12			; We will draw to odd lines in GDC memory @ word address
+	mov 	di,21*64+5			; We will draw to odd lines in GDC memory @ word address
 	mov		ax,cs
-	add		ax,cgapic1
+	add		ax,cgapic2
 	jmp		.nextPlane
 
-.picture_ready:
+picture_ready:
 	
 ;-------------------------------
 ; Wait for key stroke
@@ -253,7 +265,7 @@ screen:
 	; Mode, words/line-2, HSync+VSync, VSync+HFrontPorch, HBackPorch, 
 	; VFrontPorch, Active lines, AltiveLines + VBackPorch
 	; 800x240
-	db 8, GDCP_FIFO_PAR, 0x12, 0x30, 0x64, 0x08, 0x03, 0x03, 0xf0, 0x40
+	db 8, GDCP_FIFO_PAR, 0x16, 0x30, 0x64, 0x08, 0x03, 0x03, 0xf0, 0x40
 	; The pitch (RAM line width) is 64 words
 	db 1, GDCP_FIFO_CMD, GDC_CMD_PITCH
 	db 1, GDCP_FIFO_PAR, 0x40
@@ -278,6 +290,7 @@ screen:
 	db 3, GDCP_FIFO_PAR, 0x00, 0x00, 0x00
 	; Set vsync to generate (master mode)
 	db 1, GDCP_FIFO_CMD, GDC_CMD_VSYNC | SYNC_MASTER
+	; Reset the video card
 	db 1, GDCP_RESET, 0x00
 	; Enable IRQ
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
@@ -327,11 +340,11 @@ screen:
 	
 	; Enable IRQ
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
-	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_PLANE0 | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_BLANK
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_BLANK
 	db 0xff		; Wait for vertical retrace IRQ
 	; Disable IRQ & enable Scroll writing
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
-	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_PLANE0 | GDCM_WRITE | GDCM_SCROLL | GDCM_NOINT | GDCM_BLANK
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_SCROLL | GDCM_NOINT | GDCM_BLANK
 	; Write scroll table
 	db 1, GDCP_IND_ADDR, GDCIR_SCROLL
 	db 128, GDCP_IND_DATA   ; Need to slice into 2, to make it 256
@@ -345,7 +358,7 @@ screen:
 	db 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f
 	db 128, GDCP_IND_DATA
 	db 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f
-	db 0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x1e, 0x1f
+	db 0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f
 	db 0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf
 	db 0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf
 	db 0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf
@@ -354,10 +367,10 @@ screen:
 	db 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff
 	; Disable scroll write
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
-	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_PLANE0 | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_BLANK
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_NOBLANK
 	
-	; Initialize patter multiplier to 1 (negated)
-	db 1, GDCP_IND_ADDR, GDCIR_PTRN
+	; Initialize pattern multiplier to 1 (negated)
+	db 1, GDCP_IND_ADDR, GDCIR_PTRN_MUL
 	db 1, GDCP_IND_DATA, 0xff
 	; Initialize patter register, to output everything
 	db 1, GDCP_IND_ADDR, GDCIR_PTRN
@@ -371,6 +384,35 @@ screen:
 	db 1, GDCP_IND_ADDR, GDCIR_ALUPS
 	db 1, GDCP_IND_DATA, 0
 	
+	; Set GDC load mask to FFFF
+	db 1, GDCP_FIFO_CMD, GDC_CMD_MASK
+	db 2, GDCP_FIFO_PAR, 0xff, 0xff
+	; Set WriteBuffer mask to 0000 (inverted)
+	db 1, GDCP_WMASK, 0
+	db 1, GDCP_WMASK_H, 0
+	
+	; Fill WriteBuffer with 0 inverted
+	db 1, GDCP_IND_ADDR, GDCIR_PRAM
+	db 1, GDCP_IND_DATA, 0
+	db 16, GDCP_PRAM, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
+	db 1, GDCP_IND_ADDR, GDCIR_PRAM
+	db 1, GDCP_IND_DATA, 0
+	
+	db 1, GDCP_IND_ADDR, GDCIR_MODE
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK
+	db 0xff		; Wait for vertical retrace IRQ
+	; Disable IRQ & enable Scroll writing
+	db 1, GDCP_IND_ADDR, GDCIR_MODE
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_NOBLANK
+	; Clear screen
+	db 1, GDCP_FIFO_CMD, GDC_CMD_CURS
+	db 2, GDCP_FIFO_PAR, 0,0
+	db 1, GDCP_FIFO_CMD, GDC_CMD_FIGS
+	db 3, GDCP_FIFO_PAR, 2, 0xff, 0xff
+	db 1, GDCP_FIFO_CMD, 0x22
+	db 2, GDCP_FIFO_PAR, 0xff, 0xff
+	
+	; Unblank monitor
 	db 1, GDCP_FIFO_CMD, GDC_CMD_NOBLANK
 	; Switch to Graphics Option card
 	db 1, 0x0a, 0x87
