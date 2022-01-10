@@ -144,6 +144,10 @@ screen_ready:
 	mov		al,0x0e				; Write to plane 0 only, replace mode
 	out		GDCP_IND_DATA,al
 	
+	mov 	al,GDCIR_PRAM       ; Reset Write Buffer pointer
+	out		GDCP_IND_ADDR,al
+	out 	GDCP_IND_DATA,al
+	
 	; Initial Cursor position, for centering 640x200 image on 800x240
 	mov		di,20*64+5			; 20 lines skipped, shifted right by 5 words
 	; Initialize a few registers
@@ -172,32 +176,21 @@ screen_ready:
 	out		GDCP_FIFO_PAR,al
 	mov		al,ah
 	out		GDCP_FIFO_PAR,al
+
+.wait_gdc_ready:
+	in      al,GDCP_STATUS		; read the GDC status
+	test    al,0x20             ; In vertical sync?
+	jz      .wait_gdc_ready    	; wait if not.
+	test    al,0x04		        ; FIFO empty & Vertical sync bit set?
+	jz      .wait_gdc_ready    	; wait if not.
+	
 	
 	; each line is 80 (5x16) bytes long
 	mov		cl,5
 .nextBytesInLine:
 	push	cx					; 
-	mov		cl,8				; We write 16 bytes (8 words) at once in the write buffer
 
-.wait_gdc_ready:
-	in      al,GDCP_STATUS		; read the GDC status
-	test    al,0x04		        ; FIFO empty & Vertical sync bit set?
-	jz      .wait_gdc_ready    	; wait if not.
-	test    al,0x20
-	jz      .wait_gdc_ready    	; wait if not.
-	
-	mov 	al,GDCIR_PRAM
-	out		GDCP_IND_ADDR,al
-	out 	GDCP_IND_DATA,al
-	
-.nextBytes:
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	loop	.nextBytes
-	
-	; Command the GDC to write from Write Buffer
+	; Prepare the GDC to write from Write Buffer
 	mov		al,GDC_CMD_FIGS
 	out		GDCP_FIFO_CMD,al
 	mov		al,2				; Direction 2, WDAT will come
@@ -207,8 +200,19 @@ screen_ready:
 	mov		al,0
 	out		GDCP_FIFO_PAR,al
 	
-	;mov		al,GDC_CMD_WDAT | D_REPLACE | D_WORD
-	mov		al,0x22
+	mov		cl,4				; We write 16 bytes (4 * 2 words) at once in the write buffer
+.nextBytes:
+	lodsw
+	out		dx,al
+	mov		al,ah
+	out		dx,al
+	lodsw
+	out		dx,al
+	mov		al,ah
+	out		dx,al
+	loop	.nextBytes
+	
+	mov		al,GDC_CMD_WDAT | D_REPLACE | D_WORD
 	out		GDCP_FIFO_CMD,al	; Start the write
 	mov		al,0xff				; Set write mask, only LSB is used anyways...
 	out		GDCP_FIFO_PAR,al
