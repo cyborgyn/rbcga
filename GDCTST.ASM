@@ -169,13 +169,16 @@ screen_ready:
 .nextLine:
 	push	cx					; 
 	
+	test    cl,1
+	jnz     .dontWait
 .wait_gdc_ready:
 	in      al,GDCP_STATUS		; read the GDC status
 	test    al,0x20             ; In vertical sync?
 	jz      .wait_gdc_ready    	; wait if not.
-;	test    al,0x04		        ; FIFO empty & Vertical sync bit set?
-;	jz      .wait_gdc_ready    	; wait if not.
-	
+	test    al,0x04		        ; FIFO empty & Vertical sync bit set?
+	jz      .wait_gdc_ready    	; wait if not.
+.dontWait:
+
 	; Write DI to GDC Cursor Position
 	mov		al,GDC_CMD_CURS
 	out		GDCP_FIFO_CMD,al
