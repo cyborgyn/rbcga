@@ -290,7 +290,7 @@ screen:
 	; Mode, words/line-2, HSync+VSync, VSync+HFrontPorch, HBackPorch, 
 	; VFrontPorch, Active lines, AltiveLines + VBackPorch
 	; 800x240
-	db 8, GDCP_FIFO_PAR, 0x02, 0x26, 0x64, 0x08, 0x03, 0x03, 0xc8, 0x40
+	db 8, GDCP_FIFO_PAR, 0x02, 0x26, 0x24, 0x34, 0x08, 0x22, 0xc8, 0x8c
 	; The pitch (RAM line width) is 64 words
 	db 1, GDCP_FIFO_CMD, GDC_CMD_PITCH
 	db 1, GDCP_FIFO_PAR, 0x40
