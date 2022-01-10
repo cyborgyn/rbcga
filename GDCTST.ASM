@@ -169,14 +169,6 @@ screen_ready:
 .nextLine:
 	push	cx					; 
 	
-	; Write DI to GDC Cursor Position
-	mov		al,GDC_CMD_CURS
-	out		GDCP_FIFO_CMD,al
-	mov		ax,di
-	out		GDCP_FIFO_PAR,al
-	mov		al,ah
-	out		GDCP_FIFO_PAR,al
-
 .wait_gdc_ready:
 	in      al,GDCP_STATUS		; read the GDC status
 	test    al,0x20             ; In vertical sync?
@@ -184,24 +176,36 @@ screen_ready:
 	test    al,0x04		        ; FIFO empty & Vertical sync bit set?
 	jz      .wait_gdc_ready    	; wait if not.
 	
+	; Write DI to GDC Cursor Position
+	mov		al,GDC_CMD_CURS
+	out		GDCP_FIFO_CMD,al
+	mov		ax,di
+	out		GDCP_FIFO_PAR,al
+	mov		al,ah
+	out		GDCP_FIFO_PAR,al
 	
 	; each line is 80 (5x16) bytes long
 	mov		cl,5
 .nextBytesInLine:
-	push	cx					; 
 
 	; Prepare the GDC to write from Write Buffer
-	mov		al,GDC_CMD_FIGS
-	out		GDCP_FIFO_CMD,al
-	mov		al,2				; Direction 2, WDAT will come
-	out		GDCP_FIFO_PAR,al
-	mov		al,7				; 8 words waiting in Write Buffer
-	out		GDCP_FIFO_PAR,al
-	mov		al,0
-	out		GDCP_FIFO_PAR,al
-	
-	mov		cl,4				; We write 16 bytes (4 * 2 words) at once in the write buffer
-.nextBytes:
+	mov		al,GDC_CMD_FIGS     ; # 4 |
+	out		GDCP_FIFO_CMD,al    ; #14 |
+	mov		al,2				; # 4 | Direction 2, WDAT will come
+	out		GDCP_FIFO_PAR,al    ; #14 |
+	mov		al,7				; # 4 | 8 words waiting in Write Buffer
+	out		GDCP_FIFO_PAR,al    ; #14 |
+	mov		al,0                ; # 4 |
+	out		GDCP_FIFO_PAR,al    ; #14 |
+	                            ; =72 cycles
+	lodsw                       ; Write 16 bytes to Write Buffer
+	out		dx,al               ; #21 / byte = 336 Cycles
+	mov		al,ah
+	out		dx,al
+	lodsw
+	out		dx,al
+	mov		al,ah
+	out		dx,al
 	lodsw
 	out		dx,al
 	mov		al,ah
@@ -210,18 +214,31 @@ screen_ready:
 	out		dx,al
 	mov		al,ah
 	out		dx,al
-	loop	.nextBytes
+	lodsw
+	out		dx,al
+	mov		al,ah
+	out		dx,al
+	lodsw
+	out		dx,al
+	mov		al,ah
+	out		dx,al
+	lodsw
+	out		dx,al
+	mov		al,ah
+	out		dx,al
+	lodsw
+	out		dx,al
+	mov		al,ah
+	out		dx,al
 	
 	mov		al,GDC_CMD_WDAT | D_REPLACE | D_WORD
-	out		GDCP_FIFO_CMD,al	; Start the write
-	mov		al,0xff				; Set write mask, only LSB is used anyways...
-	out		GDCP_FIFO_PAR,al
-	out		GDCP_FIFO_PAR,al
-	
-	pop		cx
-	loop	.nextBytesInLine
-	
-	
+	out		GDCP_FIFO_CMD,al	; #14 | Start the write
+	mov		al,0xff				; # 4 | Set write mask, only LSB is used anyways...
+	out		GDCP_FIFO_PAR,al    ; #14 |
+	out		GDCP_FIFO_PAR,al    ; #14 |
+	                            ; =46 cycles
+	loop	.nextBytesInLine    ; #17 |
+	                            ; =471 cycles / line (overhead = 135)
 	add		di,linefeed			; Skip unused bytes in GDC RAM, and position to next*2 line
 	
 	pop		cx
@@ -269,7 +286,7 @@ screen:
 	; Mode, words/line-2, HSync+VSync, VSync+HFrontPorch, HBackPorch, 
 	; VFrontPorch, Active lines, AltiveLines + VBackPorch
 	; 800x240
-	db 8, GDCP_FIFO_PAR, 0x16, 0x30, 0x64, 0x08, 0x03, 0x03, 0xf0, 0x40
+	db 8, GDCP_FIFO_PAR, 0x12, 0x30, 0x64, 0x08, 0x03, 0x03, 0xf0, 0x40
 	; The pitch (RAM line width) is 64 words
 	db 1, GDCP_FIFO_CMD, GDC_CMD_PITCH
 	db 1, GDCP_FIFO_PAR, 0x40
