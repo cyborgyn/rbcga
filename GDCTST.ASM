@@ -179,13 +179,13 @@ screen_ready:
 	jz      .wait_gdc_ready    	; wait if not.
 .dontWait:
 
-	; Write DI to GDC Cursor Position
-	mov		al,GDC_CMD_CURS
-	out		GDCP_FIFO_CMD,al
-	mov		ax,di
-	out		GDCP_FIFO_PAR,al
-	mov		al,ah
-	out		GDCP_FIFO_PAR,al
+	; Write DI to GDC Cursor Position -> 50 cycles
+	mov		al,GDC_CMD_CURS		; # 4
+	out		GDCP_FIFO_CMD,al	; #14
+	mov		ax,di				; # 2
+	out		GDCP_FIFO_PAR,al	; #14
+	mov		al,ah				; # 2
+	out		GDCP_FIFO_PAR,al	; #14
 	
 	; each line is 80 (5x16) bytes long
 	mov		cl,5
