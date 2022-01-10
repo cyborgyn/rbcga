@@ -149,7 +149,7 @@ screen_ready:
 	out 	GDCP_IND_DATA,al
 	
 	; Initial Cursor position, for centering 640x200 image on 800x240
-	mov		di,20*64+5			; 20 lines skipped, shifted right by 5 words
+	mov		di,20*64			; 20 lines skipped, shifted right by 5 words
 	; Initialize a few registers
 	xor		cx,cx				; We need CH=00
 	mov 	dx,GDCP_PRAM		; We will use it in the loop as out port
@@ -252,7 +252,7 @@ screen_ready:
 	cs mov	word [$],0xeb + ((picture_ready - $ - 2) << 8)
 	
 	; We need the odd lines as well, starting from B800:0000
-	mov 	di,21*64+5			; We will draw to odd lines in GDC memory @ word address
+	mov 	di,21*64			; We will draw to odd lines in GDC memory @ word address
 	mov		ax,cs
 	add		ax,cgapic2
 	jmp		.nextPlane
@@ -290,7 +290,7 @@ screen:
 	; Mode, words/line-2, HSync+VSync, VSync+HFrontPorch, HBackPorch, 
 	; VFrontPorch, Active lines, AltiveLines + VBackPorch
 	; 800x240
-	db 8, GDCP_FIFO_PAR, 0x02, 0x30, 0x64, 0x08, 0x03, 0x03, 0xf0, 0x40
+	db 8, GDCP_FIFO_PAR, 0x02, 0x26, 0x64, 0x08, 0x03, 0x03, 0xc8, 0x40
 	; The pitch (RAM line width) is 64 words
 	db 1, GDCP_FIFO_CMD, GDC_CMD_PITCH
 	db 1, GDCP_FIFO_PAR, 0x40
