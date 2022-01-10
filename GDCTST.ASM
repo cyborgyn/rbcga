@@ -172,7 +172,7 @@ screen_ready:
 .nextLine:
 	push	cx					; 
 	
-	test    cl,1
+	test    cl,1                ; Check GDC state on every 2nd line
 	jnz     .dontWait
 .wait_gdc_ready:
 	in      al,GDCP_STATUS		; read the GDC status
@@ -184,7 +184,7 @@ screen_ready:
 	
 	; We gained 50+ cycles by eliminating cursor positioning in GDC
 	xchg	si,di				; # 4 | Continue with the odd/even other lines
-	
+	cli
 	; each line is 80 (5x16) bytes long
 	mov		cl,5
 .nextBytesInLine:
@@ -241,6 +241,7 @@ screen_ready:
 	                            ; =48 cycles
 	loop	.nextBytesInLine    ; #17 |
 	                            ; =469 cycles / 16 bytes (overhead = 133) -> 2345 cycles / line
+	sti
 	pop		cx
 	loop	.nextLine
 	
