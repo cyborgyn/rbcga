@@ -171,24 +171,26 @@ screen_ready:
 	mov		cl,200
 .nextLine:
 	push	cx					; 
+
+.wait_new_vtrace:
+	in      al,GDCP_STATUS		; read the GDC status
+	test    al,0x20             ; In vertical sync?
+	jnz     .wait_new_vtrace    	; wait if yes.
 	
-	test    cl,1                ; Check GDC state on every 2nd line
-	jnz     .dontWait
+	; We gained 50+ cycles by eliminating cursor positioning in GDC
+	xchg	si,di				; # 4 | Continue with the odd/even other lines
+	; each line is 80 (5x16) bytes long
+	mov		cl,5
+.nextBytesInLine:
+
 .wait_gdc_ready:
 	in      al,GDCP_STATUS		; read the GDC status
 	test    al,0x20             ; In vertical sync?
 	jz      .wait_gdc_ready    	; wait if not.
 	test    al,0x04		        ; FIFO empty & Vertical sync bit set?
 	jz      .wait_gdc_ready    	; wait if not.
-.dontWait:
-	
-	; We gained 50+ cycles by eliminating cursor positioning in GDC
-	xchg	si,di				; # 4 | Continue with the odd/even other lines
-	cli
-	; each line is 80 (5x16) bytes long
-	mov		cl,5
-.nextBytesInLine:
-
+    
+    cli
 	; Prepare the GDC to write from Write Buffer
 	mov		ax,0x0200+GDC_CMD_FIGS	; # 4 |
 	out		GDCP_FIFO_CMD,al    ; #14 |
@@ -278,7 +280,7 @@ screen:
 	; Mode, words/line-2, HSync+VSync, VSync+HFrontPorch, HBackPorch, 
 	; VFrontPorch, Active lines, AltiveLines + VBackPorch
 	; 640x200
-	db 8, GDCP_FIFO_PAR, 0x02, 0x16, 0x61, 0x04, 0x02, 0x03, 0xf0, 0x40
+	db 8, GDCP_FIFO_PAR, 0x16, 0x24, 0x02, 0x09, 0x00, 0x03, 0xe6, 0x14
 	; The pitch (RAM line width) is 40 words = 640 pixels
 	db 1, GDCP_FIFO_CMD, GDC_CMD_PITCH
 	db 1, GDCP_FIFO_PAR, 0x28
