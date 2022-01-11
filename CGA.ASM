@@ -16,8 +16,7 @@
 ; - Periodic framebuffer synchronization
 ; - Switching back to built-in char screen
 ;-----------------------------------------------------------
-VERSION:
-	equ 0x0001
+VERSION: equ 0x0001
 	
 	use16
     cpu 	8086
@@ -64,7 +63,7 @@ FindFirstSpace:             ;Ez az eljrs az ES:DI cmen lv PASCAL
     push 	es              ;szer stringbl megkeresi az els SPACE
     pop 	ds              ;karaktert, majd erre a pozcira lltja
     xor 	cx,cx           ;DS:SI-t is. CX-ben a maradk string hossza lesz.
-    mov 	di,80h
+    mov 	di,0x80
     es mov 	cl,[di]
     or 		cx,cx
     jz 		.ExitFFS
@@ -119,7 +118,7 @@ FindParam:	; Searches for first commandline parameter
 DetectTsr:	; ZF if present
 	mov 	ax,0xff00
 	int		0x10
-	cmp		ax,'CG'
+	cmp		ax,'C'<<8+'G'
 	ret
 ;-----------------------------------------------------------
 ; Main entry point of program
@@ -134,11 +133,11 @@ Main:
 	add 	cx,2
     call 	UpCase          ; Convert params to upper case
 	
-	mov 	si,String.Param1
+	mov 	si,Strings.Param1
 	call 	FindParam		; Find "OFF" cmd line param
 	jnc		TryUninstall
 	
-	mov		dx,String.Help
+	mov		dx,Strings.Help
 
 ExitWithErrMessage:
 	mov		al,1			; Exit error code
@@ -150,7 +149,7 @@ ExitWithMessage:
 TryUninstall:
 	call	DetectTsr
 	jz		.detected
-	mov		dx,String.E_TsrNotPresent
+	mov		dx,Strings.E_TsrNotPresent
 	jmp 	ExitWithErrMessage
 .detected:
 	mov		ax,0xff01
@@ -175,31 +174,30 @@ TryInstall:
 
 Strings:
 .Greetings:
-	db "CGA Emulator v",((VERSION >> 8)+'0'),".",((VERSION && 0xff)+'0')," for DEC Rainbow 100, Copyright Cyborgyn 2022\n\r$"
+	db "CGA Emulator v",((VERSION >> 8)+'0'),".",((VERSION & 0xff)+'0')," for DEC Rainbow 100, Copyright Cyborgyn 2022",10,13,'$'
 .Help:
-	db "  Unrecognised commandline parameter. Usage: CGA.COM [command]\n\r"
-	db "  without parameters.....: Install CGA.COM emulator in RAM\r\n"
-	db "  Possible commands:\r\n"
-	db "  OFF....................: Uninstall from RAM\r\n"
+	db "  Unrecognised commandline parameter. Usage: CGA.COM [command]",10,13
+	db "  without parameters.....: Install CGA.COM emulator in RAM",10,13
+	db "  Possible commands:",10,13
+	db "  OFF....................: Uninstall from RAM",10,13
 	db '$'
 .Param1:
-	db (.Param2-.Param1-1),' OFF',0
+	db (.Param2-.Param1-1)," OFF",0
 .Param2:
 .M_Removed:
-	db "  CGA.COM deactivated.\n\r$"
+	db "  CGA.COM deactivated.",10,13,'$'
 .M_Installed:
-	db "  CGA.COM activated.\n\r$"
+	db "  CGA.COM activated.",10,13,'$'
 .E_TsrNotPresent:
-	db "  CGA.COM not active!\n\r$"
+	db "  CGA.COM not active!",10,13,'$'
 .E_TrsPresent:
-	db "  CGA.COM already activated!\n\r$"
+	db "  CGA.COM already activated!",10,13,'$'
 .E_ErrorUninstalling:
-	db "  Error deactivating CGA.COM!\n\r$"
+	db "  Error deactivating CGA.COM!",10,13,'$'
 ;-----------------------------------------------------------
 ; TSR part (will be copied over to the beginning of CS)
 ;-----------------------------------------------------------
 PART_TSR:
-	org 	0
 INT10:
 	cmp		ah,0xff
 	jz		.F_cga_com_functions
@@ -222,13 +220,12 @@ INT10:
 	iret
 .F_detection_function:
 	mov		bx,VERSION
-	mov		ax,'CG'
+	mov		ax,'C'<<8+'G'
 	iret
 
 ;-----------------------------------------------------------
 ; This is the TSR installer code
 ;-----------------------------------------------------------
-	org 	$ - PART_TSR + 0x100
 PART_INSTALLER:
 	; TODO: do we need to adjust temporarily the SS&SP??
 	mov		ax,cs
