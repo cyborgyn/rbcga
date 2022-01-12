@@ -17,7 +17,6 @@
 ; - Switching back to built-in char screen
 ;-----------------------------------------------------------
 VERSION:            equ 0x0001
-IRQ10ADDRESS:       equ 0x10 * 4
 	use16
     cpu 	8086
     org 	0x100
@@ -34,7 +33,6 @@ INT10:			; Entry point for Int10
 ;---------------------
 .F_CGACOM:          equ 0xff
 .F_CGACOM_DETECT:   equ 0x00
-.F_CGACOM_DEACT:    equ 0x01
 .Magic:             equ 'C'<<8|'G'
 ;---------------------
 ; Actual INT 10:
@@ -42,26 +40,22 @@ INT10:			; Entry point for Int10
 	cmp		ah,.F_CGACOM
 	jz		.F_cga_com_functions	; ah = 'C'
 	
-	; Non-handled function, call to original
+	; for non-handled function, jump to original int handler
 	db 0xEA		; JMP FAR
 .original:
 	dw 0x0000,0x0000
 
 .F_cga_com_functions:
-	cmp		al,.F_CGACOM_DEACT
-	jz 		.F_deactivate_function	; al = 01
-	jb		.F_detection_function	; al = 00
+	cmp		al,.F_CGACOM_DETECT
+	jz		.F_detection_function	; al = 00
 	stc
 	iret
-	
-.F_deactivate_function:
-	; TODO: write unload
-	; Check INT 10 pointing to us
-	; Restore original int 10
-	; Free memory
-	iret
+
+	; Returns AX=magic, BX=version, ES=TSR segment
 .F_detection_function:
 	mov		bx,VERSION
+	mov		ax,cs
+	mov		es,ax
 	mov		ax,.Magic
 	iret
 
@@ -69,7 +63,7 @@ INT10:			; Entry point for Int10
 ; This is the TSR installer code
 ;-----------------------------------------------------------
 PART_INSTALLER:
-	; Copy TSR to the beginning of CS segment
+	; Copy TSR to the beginning of CS segment + 80h
 	; We don't need command line parameters anymore
 	cld								; Set increment direction
 	mov		ax,cs
@@ -92,16 +86,16 @@ PART_INSTALLER:
 	mov     [INT10.original - PART_TSR+2],es
 	
 	; Set new interrupt vector
-	mov     dx,INT10 - PART_TSR
+	mov     dx,INT10 - PART_TSR		; Note: DS=TSR segment!
 	mov     ax,0x2510
-	int     0x21
+	int     0x21					; DOS Set interrupt
 	
 	; Calculate size of TSR memory needed,
 	; and exit remaining resident
 	mov		dx,Strings.M_Activated
 	call    Print
 	; The memory size in pragraphs to reserve
-	mov		dx,(PART_INSTALLER-PART_TSR) / 0x10 + 8 + 1
+	mov		dx,(PART_INSTALLER - PART_TSR) / 0x10 + 8 + 1
 	mov		ax,0x3100
 	int		0x21
 
@@ -201,6 +195,41 @@ DetectTsr:	; ZF if present
 	int		0x10
 	cmp		ax,INT10.Magic
 	ret
+
+;-----------------------------------------------------------
+; This is the TSR uninstaller code
+DeactivateTsr:
+	push 	es						; Save TSR segment
+	; Get current int 10 interrupt vector
+	mov     ax,0x3510
+	int     0x21
+	; Check if it is pointing to CGA.COM TSR
+	mov 	dx,Strings.E_CantDeactivate
+	cmp 	bx,INT10 - PART_TSR
+	pop		bx						; Restore TSR segment
+									; before we jump away
+	jnz 	ExitWithErrMessage		; If not, error msg
+	mov		ax,es
+	cmp		ax,bx
+	jnz		ExitWithErrMessage		; If not, error msg
+	
+	; Reset the old int 10
+	es mov	ax,[INT10.original - PART_TSR+2]
+	mov		ds,ax
+	es mov	dx,[INT10.original - PART_TSR]
+	mov		ax,0x2510				; DOS Set interrupt
+	int		0x21
+	
+	; Free DOS memory of TSR
+	mov		ax,es
+	sub		ax,8
+	mov		es,ax
+	mov		ah,0x49					; DOS Free memory
+	int		0x21
+	mov		dx,Strings.E_CantDeactivate
+	jc		ExitWithErrMessage		; If there was an error, show err msg
+	ret
+
 ;-----------------------------------------------------------
 ; Main entry point of program
 ;-----------------------------------------------------------
@@ -208,7 +237,7 @@ Main:
 	mov		dx,Strings.Greetings
 	call 	Print
 	call 	FindFirstSpace
-    or 		cx,cx      		; If String.IsNullOrEmpty(parameters)
+    or 		cx,cx      		; If Strings.IsNullOrEmpty(parameters)
     jz 		TryInstall
     
 	add 	cx,2
@@ -236,11 +265,7 @@ TryUninstall:
 	cmp		bx,VERSION
 	jnz		ExitWithErrMessage	; If incorrect version is detected, error msg
 	
-	mov		ax,INT10.F_CGACOM<<8 | INT10.F_CGACOM_DEACT
-	int 	0x10				; Call deactivate
-	mov 	dx,Strings.E_CantDeactivate
-	or		ax,ax
-	jnz		ExitWithErrMessage	; If couldn't, error msg
+	call 	DeactivateTsr		; Deactivate
 	
 	call	DetectTsr			; Check if it is unloaded
 	jz		ExitWithErrMessage	; If it's still there, error msg
@@ -253,10 +278,13 @@ TryInstall:
 	mov		dx,Strings.E_AlreadyActive
 	jz		ExitWithErrMessage	; If active, error msg
 	
-	; TODO: we need to check DOS version, Rainbow machine, etc...
-	; TODO: do the actual install
+	; TODO: check DOS version
+	; TODO: check Rainbow HW:
+	;	- Memory size
+	; 	- Graphics option
+	; 	- Revision
+	; TODO: check CodeBlue is running
 	jmp     PART_INSTALLER
-
 
 Strings:
 .Greetings:
