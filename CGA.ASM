@@ -291,10 +291,12 @@ Strings:
 	db "CGA Emulator v",((VERSION >> 8)+'0'),".",((VERSION & 0xff)+'0')
 	db " for DEC Rainbow 100, Copyright Cyborgyn 2022",10,13,'$'
 .Help:
-	db "  Unrecognised command line parameter. Usage: CGA.COM [command]",10,13
+	db "  Unrecognised command line parameter.",10,13
+	db "  Usage: CGA.COM [command]",10,13
 	db "  without parameters.....: Activate CGA.COM emulator",10,13
 	db "  Possible commands:",10,13
-	db "  OFF....................: Deactivate",10,13
+	db "  OFF....................: Deactivate",10,13,10,13
+	db "For additional info, visit https://github.com/cyborgyn/rbcga",10,13
 	db '$'
 .Param1:
 	db (.Param2-.Param1-1)," OFF",0
