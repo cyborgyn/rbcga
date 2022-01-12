@@ -16,8 +16,8 @@
 ; - Periodic framebuffer synchronization
 ; - Switching back to built-in char screen
 ;-----------------------------------------------------------
-VERSION: 		equ 0x0001
-IRQ10ADDRESS:	equ 0x10 * 4
+VERSION:            equ 0x0001
+IRQ10ADDRESS:       equ 0x10 * 4
 	use16
     cpu 	8086
     org 	0x100
@@ -32,21 +32,17 @@ INT10:			; Entry point for Int10
 ;---------------------
 ; INT 10 declarations
 ;---------------------
-.F_CGACOM:	equ 0xff
-.F_CGACOM_DETECT:
-			equ 0x00
-.F_CGACOM_DEACT:
-			equ 0x01
-.Magic:
-			equ 'C'<<8+'G'
+.F_CGACOM:          equ 0xff
+.F_CGACOM_DETECT:   equ 0x00
+.F_CGACOM_DEACT:    equ 0x01
+.Magic:             equ 'C'<<8|'G'
 ;---------------------
 ; Actual INT 10:
 ;---------------------
 	cmp		ah,.F_CGACOM
-	jz		.F_cga_com_functions	; ah = ff
+	jz		.F_cga_com_functions	; ah = 'C'
 	
 	; Non-handled function, call to original
-	cs
 	db 0xEA		; JMP FAR
 .original:
 	dw 0x0000,0x0000
@@ -80,27 +76,30 @@ PART_INSTALLER:
 	mov		ds,ax
 	mov		es,ax
 	mov		si,PART_TSR
-	xor		di,di
+	mov     di,0x80
 	mov		cx,(PART_INSTALLER - PART_TSR)/2+1
 	rep movsw						; Copy TSR to segment start
 	
-	; Copy over old interrupt vector
-	xor		ax,ax
-	mov		ds,ax					; ES=0000, int table
-	mov		si,IRQ10ADDRESS
-	mov		di,INT10.Original-PART_TSR
-	movsw							; Copy original int 10 address
-	movsw							; to TSR
+	; Get old interrupt vector
+	mov     ax,0x3510
+	int     0x21
+	mov     [INT10.original - PART_TSR],bx
+	mov     [INT10.original - PART_TSR+2],es
 	
 	; Set new interrupt vector
-	mov		ax,cs					; Set INT 10 to point to
-	mov		[IRQ10ADDRESS],ax
-	mov		ax,INT10-PART_TSR		; TSR's INT 10 handler
-	mov		[IRQ10ADDRESS+2],ax
+	mov     ax,cs
+	add     ax,0x08
+	mov     ds,ax
+	mov     dx,INT10 - PART_TSR
+	mov     ax,0x2510
+	int     0x21
 	
 	; Calculate size of TSR memory needed,
 	; and exit remaining resident
-	mov		dx,(PART_INSTALLER-PART_TSR) / 0x10 + 1
+	mov		dx,Strings.M_Activated
+	call    Print
+	; The memory size in pragraphs to reserve
+	mov		dx,(PART_INSTALLER-PART_TSR) / 0x10 + 8 + 1
 	mov		ax,0x3100
 	int		0x21
 
@@ -235,7 +234,7 @@ TryUninstall:
 	cmp		bx,VERSION
 	jnz		ExitWithErrMessage	; If incorrect version is detected, error msg
 	
-	mov		ax,INT10.F_CGACOM<<8 + INT10.F_CGACOM_DEACT
+	mov		ax,INT10.F_CGACOM<<8 | INT10.F_CGACOM_DEACT
 	int 	0x10				; Call deactivate
 	mov 	dx,Strings.E_CantDeactivate
 	or		ax,ax
@@ -254,9 +253,7 @@ TryInstall:
 	
 	; TODO: we need to check DOS version, Rainbow machine, etc...
 	; TODO: do the actual install
-	mov		al,0
-	mov		dx,Strings.M_Activated
-	jmp		ExitWithMessage
+	jmp     PART_INSTALLER
 
 
 Strings:
