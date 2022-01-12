@@ -80,6 +80,11 @@ PART_INSTALLER:
 	mov		cx,(PART_INSTALLER - PART_TSR)/2+1
 	rep movsw						; Copy TSR to segment start
 	
+	; Set DS to point to TSR segment
+	mov     ax,cs
+	add     ax,0x08
+	mov     ds,ax
+	
 	; Get old interrupt vector
 	mov     ax,0x3510
 	int     0x21
@@ -87,9 +92,6 @@ PART_INSTALLER:
 	mov     [INT10.original - PART_TSR+2],es
 	
 	; Set new interrupt vector
-	mov     ax,cs
-	add     ax,0x08
-	mov     ds,ax
 	mov     dx,INT10 - PART_TSR
 	mov     ax,0x2510
 	int     0x21
