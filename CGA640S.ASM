@@ -14,8 +14,11 @@ InitCGA640x200x2:
 	push	di
 	push	ds
 	push	es
+	
+	mov     ax,cs               ; Set DS point to our segment
+	mov     ds,ax
 	cld
-	mov		si,screen640x200
+	mov		si,(screen640x200 - PART_TSR)
 	xor		cx,cx
 	xor		dx,dx
 .cont_setup:
@@ -41,14 +44,14 @@ InitCGA640x200x2:
 	cli
 	xor		ax,ax				; Save the old IRQ vector
 	mov		es,ax
-	mov		byte [irq_handled],al
+	mov		byte [(irq_handled - PART_TSR)],al
 	mov		bx,GDC_IRQ_ADDR
 	es mov	cx,word [bx]
 	push	cx
 	es mov	cx,word [bx+2]
 	push	cx
 	
-	mov		cx,wait_irq_handler	; Write our new, wait IRQ handler
+	mov		cx,(wait_irq_handler - PART_TSR)	; Write our new, wait IRQ handler
 	es mov	word [bx],cx
 	mov		cx,cs
 	es mov	word [bx+2],cx
@@ -56,7 +59,7 @@ InitCGA640x200x2:
 	mov 	cx,8000				; time-out after 8000 cycles
 	sti
 .do_wait:
-	test	byte [irq_handled],0xff
+	test	byte [(irq_handled - PART_TSR)],0xff
 	jz		.irq_handled
 	loop	.do_wait
 .irq_handled:
@@ -85,7 +88,7 @@ InitCGA640x200x2:
 
 ;----------------------------------------------------------------------------
 wait_irq_handler:
-	cs mov	byte [irq_handled],0xff
+	cs mov	byte [(irq_handled - PART_TSR)],0xff
 	iret
 irq_handled:
 	db 0
