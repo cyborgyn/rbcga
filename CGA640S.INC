@@ -3,6 +3,46 @@
 ;----------------------------------------------------------------------------
 
 ;----------------------------------------------------------------------------
+; SetIRQ & ReloadIRQ
+; IN:
+;	- CS:CX: new IRQ address
+;-------------------------------
+OldIRQ:
+	dw 0x0000,0x0000
+SetIRQ:
+	push	es
+	xor		ax,ax				; Save the old IRQ vector
+	mov		es,ax
+	mov		bx,GDC_IRQ_ADDR
+	es mov	ax,word [bx]
+	mov		word [OldIRQ - PART_TSR],ax
+	es mov	ax,word [bx+2]
+	mov		word [OldIRQ - PART_TSR+2],ax
+	cli
+	
+	es mov	word [bx],cx
+	mov		cx,cs
+	es mov	word [bx+2],cx
+	
+	sti
+	pop		es
+	ret
+	
+ReloadIRQ:
+	push	es
+	xor		ax,ax				; Reload the old IRQ vector
+	mov		es,ax
+	mov		bx,GDC_IRQ_ADDR
+	cli
+	mov		ax,word [OldIRQ - PART_TSR]
+	es mov	word [bx],ax
+	mov		ax,word [OldIRQ - PART_TSR+2],ax
+	es mov	word [bx+2],ax
+	sti
+	pop		es
+	ret
+	
+;----------------------------------------------------------------------------
 ; Setup screen for 640x200 black&white
 ;-------------------------------
 InitCGA640x200x2:
@@ -14,9 +54,18 @@ InitCGA640x200x2:
 	push	di
 	push	ds
 	push	es
-	
-	mov     ax,cs               ; Set DS point to our segment
+
+	mov     ax,cs               ; Set DS point to TSR segment
 	mov     ds,ax
+	
+	; Clear the framebuffer memory
+	mov		ax,word [SETUP.DisplaySeg - PART_TSR]
+	mov		es,ax
+	xor		di,di
+	mov		cx,0x2000
+	xor		ax,ax
+	rep stosw					; clear 16k memory
+	
 	cld
 	mov		si,(screen640x200 - PART_TSR)
 	xor		cx,cx
@@ -42,85 +91,38 @@ InitCGA640x200x2:
 ;-------------------------------
 .wait_vrt:						; Wait a vertical retrace IRQ
 	cli
-	xor		ax,ax				; Save the old IRQ vector
-	mov		es,ax
-	mov		byte [(irq_handled - PART_TSR)],al
-	mov		bx,GDC_IRQ_ADDR
-	es mov	cx,word [bx]
-	push	cx
-	es mov	cx,word [bx+2]
-	push	cx
+	xor		ax,ax				; Save the old IRQ vector, and
+	mov		byte [irq_handled - PART_TSR],al
+	mov		cx,(wait_irq_handler - PART_TSR)	; Set our new, wait IRQ handler
 	
-	mov		cx,(wait_irq_handler - PART_TSR)	; Write our new, wait IRQ handler
-	es mov	word [bx],cx
-	mov		cx,cs
-	es mov	word [bx+2],cx
+	call	SetIRQ
 	
 	mov 	cx,8000				; time-out after 8000 cycles
 	sti
 .do_wait:
-	test	byte [(irq_handled - PART_TSR)],0xff
+	test	byte [irq_handled - PART_TSR],0xff
 	jz		.irq_handled
 	loop	.do_wait
 .irq_handled:
-	cli
-	pop		cx
-	es mov	word [bx+2],cx
-	pop 	cx
-	es mov	word [bx],cx
-	sti
+	
+	call	ReloadIRQ			; Restore old IRQ handler
+	
 	xor 	cx,cx
 	jmp		.cont_setup
 
 .screen_ready:
-	; TODO: setup IRQ for refresh cycles
-	; TODO: clear the framebuffer memory
-	; TODO: enable IRQ
-	pop		es
-	pop		ds
-	pop		di
-	pop		si
-	pop		dx
-	pop		cx
-	pop		bx
-	pop		ax					; Restore saved registers
-	ret
-
-;----------------------------------------------------------------------------
-wait_irq_handler:
-	cs mov	byte [(irq_handled - PART_TSR)],0xff
-	iret
-irq_handled:
-	db 0
-
-;----------------------------------------------------------------------------
-; Setup screen for onboard text video out
-;-------------------------------
-InitChar80:
-	; TODO: disable IRQ
-	; TODO: uninstall IRQ handler
-	push	ax					; Save used registers
+	mov		cx,(VRetrace640x480S - PART_TSR)
+	call	SetIRQ
 	
-	mov		al,GDC_CMD_BLANK
-	out		GDCP_FIFO_CMD,al
-	mov		al,0x83
-	out		0x0a,al
-	
-	pop 	ax					; Restore saved registers
-	ret
-
-; TODO: convert this to an IRQ handler:
-;-------------------------------
-; Copy picture to framebuffer
-;-------------------------------
-	; Setup GDC for plane 0 unfiltered writes
+	; v-- This can be moved to the declarative part --v
 	; Reset GDC Cursor Position to 0,0
-	mov		al,GDC_CMD_CURS
+	mov		al,GDC_CMD_CURS		; Reset cusrsor to x=0,y=0
 	out		GDCP_FIFO_CMD,al
 	xor		ax,ax
 	out		GDCP_FIFO_PAR,al
 	out		GDCP_FIFO_PAR,al
 	
+	; Setup GDC for plane 0 unfiltered writes
 	mov		al,GDCIR_FBG		; Select Foreground/Background indirect register
 	out		GDCP_IND_ADDR,al
 	mov		al,0x0f				; Inverted foreground & background
@@ -134,35 +136,137 @@ InitChar80:
 	mov 	al,GDCIR_PRAM       ; Reset Write Buffer pointer
 	out		GDCP_IND_ADDR,al
 	out 	GDCP_IND_DATA,al
+	; A-- This can be moved to the declarative part --A
 	
-	; Initialize a few registers
-	xor		cx,cx				; We need CH=00
-	mov 	dx,GDCP_PRAM		; We will use it in the loop as out port
+	mov		word [REGSTORE.SS - PART_TSR],ss		; #18
+	mov		word [REGSTORE.SP - PART_TSR],sp		; #18
+	mov		sp,cs									; #2
+	mov		ss,sp									; #2
+	mov		sp,(IrqStack.Top - PART_TSR)+4*2		; #4
 	
-	; First copy even lines, from BA00:0000
-	; All 8000 bytes are packed next to each other
-	; starting from DS:SI
-	mov		ax,cs
-	;add		ax,cgapic1
-	mov		ds,ax
+	mov		ax,200				; IRQ BX -> scan line count down counter
+	push	ax
+	mov		ax,0				; IRQ DI -> even lines pointer
+	push	ax
+	mov		ax,0x2000			; IRQ SI -> odd lines pointer
+	push	ax
+	mov		ax,word [(SETUP.DisplaySeg - PART_TSR)]
+	push	ax
+
+	mov		ss,word [REGSTORE.SS - PART_TSR]		; #18
+	mov		sp,word [REGSTORE.SP - PART_TSR]		; #18
 	
-	xor		ax,ax
-	mov		di,ax
-	mov 	si,0x2000			; odd lines
-	; we have 200 lines, interlaced in SI,DI,SI,DI, etc...
-	mov		cl,200
-.nextLine:
-	push	cx					; 
-	
-	test    cl,1                ; Check GDC state on every 2nd line
-	jnz     .dontWait
+	; Wait until GDC is ready
 .wait_gdc_ready:
 	in      al,GDCP_STATUS		; read the GDC status
 	test    al,0x20             ; In vertical sync?
 	jz      .wait_gdc_ready    	; wait if not.
 	test    al,0x04		        ; FIFO empty & Vertical sync bit set?
 	jz      .wait_gdc_ready    	; wait if not.
-.dontWait:
+	
+	mov		al,GDCIR_MODE
+	out		GDCP_IND_ADDR,al
+	mov		al, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK
+	out		GDCP_IND_DATA,al
+	
+	pop		es
+	pop		ds
+	pop		di
+	pop		si
+	pop		dx
+	pop		cx
+	pop		bx
+	pop		ax					; Restore saved registers
+	ret
+
+;----------------------------------------------------------------------------
+wait_irq_handler:
+	cs mov	byte [irq_handled - PART_TSR],0xff
+	iret
+irq_handled:
+	db 0
+
+;----------------------------------------------------------------------------
+; Setup screen for onboard text video out
+;-------------------------------
+InitChar80:
+	push	ax					; Save used registers
+	push	bx
+	push	es
+
+	; Turning off vertical retrace IRQ, blanking graphics screen
+	mov		al,GDCIR_MODE
+	out		GDCP_IND_ADDR,al
+	mov		al, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_BLANK
+	out		GDCP_IND_DATA,al
+	
+	call 	ReloadIRQ
+	
+	mov		al,GDC_CMD_BLANK
+	out		GDCP_FIFO_CMD,al
+	mov		al,0x83
+	out		0x0a,al
+	
+	pop		es
+	pop		bx
+	pop 	ax					; Restore saved registers
+	ret
+
+;----------------------------------------------------------------------------
+; Vertical Retrace IRQ handler:
+; Copy 3 scan lines at a time to GDC
+;----------------------------------------------------------------------------
+VRetrace640x480S:
+	cs mov	word [REGSTORE.SS - PART_TSR],ss		; #18
+	cs mov	word [REGSTORE.SP - PART_TSR],sp		; #18
+	mov		sp,cs									; #2
+	mov		ss,sp									; #2
+	mov		sp,(IrqStack.Regs - PART_TSR)			; #4
+	push	ax										; #15 * 6
+	push	bx
+	push	cx
+	push	dx
+	push 	si
+	push	di
+	push	ds										; #14 * 2
+	push	es
+	mov 	ax,sp									; #2
+	mov		sp,(IrqStack.Top - PART_TSR)			; #4
+	
+	; Restore IRQ state
+	pop		ds		; CGA frame buffer segment
+	pop		si		; Odd scan line pointer
+	pop		di		; Even scan line pointer
+	pop		bx		; Line count down counter
+	
+	push	ax		; save register file SP			; #15
+													; Total = #183
+	; Register Backup-restore total = 327
+	
+	; Save registers
+	;mov		word [REGSTORE.AX - PART_TSR],ax		; #18 * 8 cycles = 144
+	;mov		word [REGSTORE.BX - PART_TSR],bx
+	;mov		word [REGSTORE.CX - PART_TSR],cx
+	;mov		word [REGSTORE.DX - PART_TSR],dx
+	;mov		word [REGSTORE.SI - PART_TSR],si
+	;mov		word [REGSTORE.DI - PART_TSR],di
+	;mov		word [REGSTORE.DS - PART_TSR],ds
+	;mov		word [REGSTORE.ES - PART_TSR],es		; restore: 17*8 = 136
+	; Register Backup-restore total = 280
+	
+	; need to track cx,si,di -> 3*(18+17) = 105
+	; push-pop: 3*(15+12) = 81
+	
+	; Initialize a few registers
+	mov 	dx,GDCP_PRAM		; We will use it in the loop as out port
+	
+	; First copy even lines, from BA00:0000
+	; All 8000 bytes are packed next to each other
+	; starting from DS:SI
+	
+	mov		cx,3				; In 1 VRetrace we display 3 can lines
+.nextLine:
+	push	cx
 	
 	; We gained 50+ cycles by eliminating cursor positioning in GDC
 	xchg	si,di				; # 4 | Continue with the odd/even other lines
@@ -225,10 +329,45 @@ InitChar80:
 	                            ; =469 cycles / 16 bytes (overhead = 133) -> 2345 cycles / line
 	sti
 	pop		cx
+	dec 	bx					; If all 200 scan lines finished,
+	jz		.restart			; We need to restart
 	loop	.nextLine
 	
-picture_ready:
+.irq_finished:
+	pop 	ax		; Stack pointer where the registers are		; #12
+	
+	; Save internal state
+	push	bx		; Line count down counter	| #12 * 4
+	push	di		; Even scan line pointer
+	push	si		; Odd scan line pointer
+	push	ds		; CGA framebuffer segment
+	
+	mov 	sp,ax	; Restore registers from different position ; #2
+	pop		es									; #12 * 8
+	pop		ds
+	pop		di
+	pop		si
+	pop		dx
+	pop		cx
+	pop		bx
+	pop		ax
+	cs mov	ss,word [REGSTORE.SS - PART_TSR]	; #17 | Original application stack segment & pointer
+	cs mov	sp,word [REGSTORE.SP - PART_TSR]	; #17
+												; Total = #144
 	iret
+
+.restart:
+	mov		al,GDC_CMD_CURS		; Reset cusrsor to x=0,y=0
+	out		GDCP_FIFO_CMD,al
+	xor		ax,ax
+	out		GDCP_FIFO_PAR,al
+	out		GDCP_FIFO_PAR,al
+	
+	mov		si,0x2000			; Reset pointers + counter
+	mov		di,0
+	mov		bx,200
+	
+	jmp 	.irq_finished
 
 screen640x200:
 	db 1, GDCP_FIFO_CMD, GDC_CMD_RESET

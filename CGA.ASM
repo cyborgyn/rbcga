@@ -92,7 +92,16 @@ SETUP:
 	dw		0xb800					; This defaults to B800
 
 %include "GDC.INC"
-%include "CGA640S.ASM"
+%include "CGA640S.INC"
+
+REGSTORE:	; SS,SP temp storage during IRQ
+.SS:	dw		0
+.SP:	dw		0
+
+IrqStack:
+	times 0x80 db 0
+.Regs:	equ $
+.Top:	equ $ - 0x20
 
 ;-----------------------------------------------------------
 ; This is the TSR installer code
