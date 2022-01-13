@@ -35,9 +35,9 @@ start:
 ;-------------------------------
 ; Detect CGA.com
 ;-------------------------------
-	mov 	ax,'C'<<8|'G'
+	mov 	ax,0xff00           ; Detect command
 	int		0x10
-	cmp		ax,INT10.Magic
+	cmp		ax,'C'<<8|'G'
 	jnz		.CGACOM_NotPresent
 	
 	mov		ax,0xff01			; Get display segment

@@ -31,10 +31,10 @@ INT10:			; Entry point for Int10
 ;---------------------
 ; INT 10 declarations
 ;---------------------
-.F_CGA_MODESWITCH	equ 0x00
+.F_CGA_MODESWITCH:  equ 0x00
 .F_CGACOM:          equ 0xff
 .F_CGACOM_DETECT:   equ 0x00
-.F_CGACOM_DISPSEG:	equ 0x01
+.F_CGACOM_DISPSEG:  equ 0x01
 .Magic:             equ 'C'<<8|'G'
 ;---------------------
 ; Actual INT 10:
@@ -68,7 +68,7 @@ INT10:			; Entry point for Int10
 
 	; Returns AX=currently used display segment
 .F_get_siplay_segment:
-	mov		ax,[SETUP.DisplaySeg - PART_TSR]
+    cs mov		ax,[SETUP.DisplaySeg - PART_TSR]
 	iret
 	
 	; Returns AX=magic, BX=version, ES=TSR segment
@@ -132,7 +132,7 @@ PART_INSTALLER:
 	
 	; If TSR is configured in test mode,
 	; display mem comes right after the TSR
-	cmp 	[SETUP.DisplaySeg - PART_TSR],0xb800
+	cmp 	word [SETUP.DisplaySeg - PART_TSR],0xb800
 	jz		.StandardMemory
 
 	; The memory size = TSR + 16k display ram
@@ -141,7 +141,7 @@ PART_INSTALLER:
 .StandardMemory:
 	; The memory size in pragraphs to reserve
 	mov		dx,(PART_INSTALLER - PART_TSR) / 0x10 + 8 + 1
-.Exit
+.Exit:
 	mov		ax,0x3100
 	int		0x21
 
@@ -156,16 +156,42 @@ Print:		; CS:DX points to '$' terminated string
 	ret
 
 ;-----------------------------------------------------------
-UpCase:		; Converts string @ CS:SI, CX length
-    push 	di
+; Normalizes PASCAL string @ CS:SI
+; Removes additional white spaces, convert to upper case
+; Out:
+;   - CX = string length
+;   - ES:DI = points also to the string
+NormalizeArgs:
 	push 	si
-	push	cx
 	mov		di,si
 	mov		ax,cs
 	mov		ds,ax
 	mov		es,ax
+	xor     cx,cx               ; Load string length
+	mov     bx,si               ; String length address
+	lodsb
+	inc     al                  ; We also need the enter key
+	mov     cl,al
+	xor     al,al
+	stosb                       ; SI & DI points to start char
+	                            ; String length [DS:BX] = 0
+
 .loop:
     lodsb
+    cmp     al,' '
+    ja      .normalChar
+    mov     al,' '              ; Normalize char to space
+    stosb
+    inc     byte [bx]
+    dec     cx
+    jz      .Exit
+.loopWhiteSpace:
+    lodsb                       ; Load next to check
+    cmp     al,' '
+    jnb     .normalChar         ; If it's already not a white space
+    loop    .loopWhiteSpace     ; If it was, just discard
+    jmp     .Exit
+.normalChar:
     cmp 	al,'a'
     jb 		.notSmall
     cmp 	al,'z'
@@ -173,54 +199,34 @@ UpCase:		; Converts string @ CS:SI, CX length
     sub 	al,'a'-'A'
 .notSmall:
     stosb
+    inc     byte [bx]
     loop 	.loop
-    pop 	cx
+.Exit:
+    mov     cl,byte [bx]
 	pop 	si
-	pop		di
-    ret
-
-;-----------------------------------------------------------
-; In the command line argument find the first ' ' (space) char
-; OUT:
-; 	- DS:SI = remaining string
-;	- CX = remaining length
-FindFirstSpace:
-	mov		ax,cs
-	mov		ds,ax
-	mov		es,ax
-    mov 	di,0x80			; ES:DI (CS:0x0080) = command line params
-    xor 	cx,cx
-    es mov 	cl,[di]			; Get parameter line length
-    or 		cx,cx
-    jz 		.ExitFFS		; If empty, we are done
-    inc 	di				; Position to first char
-    mov 	al,' '
-    repz scasb				; Find space
-    sub 	di,2			; step back ??Why 2??
-    mov 	si,di
-.ExitFFS:
+	mov     di,si
     ret
 
 ;-----------------------------------------------------------
 ; Search parameter in command line arguments string
 ; IN:
-;	- DS:SI: command line arguments
-;	- ES:DI: parameter definition (p)
-;	- CX: command line length (a.length)
+;   - CX: command line arguments length
+;	- DS:SI: parameter definition (p)
+;	- ES:DI: command line arguments
 ; OUT:
 ;	- C = 0 if parameter found, 1 if not found
 FindParam:	; Searches for first commandline parameter
     push 	cx
 	push	di
     xor 	ax,ax           
-    lodsb                   ; AX = [ES:DI] (p.length)
-    dec 	ax				; length--
+    lodsb                   ; AX = [DS:SI] (p.length)
+    dec 	si				; reset SI to the p.length
     cmp 	cx,ax			; If CX < p.length
     jb 		.ParamNotFound  ; then parameter not found
     
-	dec 	ax		;??
     sub 	cx,ax           ; CX = a.length - p.length
-    dec 	si				; DS:SI needs to point to p.length
+    inc     cx              ; for the counter we need +1
+    inc     di              ; ES:DI point to 1st char
 
 .loop:
     push 	cx				; Save max restart counter
@@ -299,17 +305,16 @@ DeactivateTsr:
 Main:
 	mov		dx,Strings.Greetings
 	call 	Print
-	call 	FindFirstSpace
-    or 		cx,cx      		; If Strings.IsNullOrEmpty(parameters)
-    jz 		TryInstall
+    mov     si,0x80         ; DS:0080 command line arguments
+    call 	NormalizeArgs   ; Convert params to upper case
+    
+    cmp     cx,1            ; If Strings.IsNullOrEmpty(parameters)
+    jna     TryInstall
 
 	mov 	si,Strings.Param2
 	call 	FindParam		; Find "TEST" cmd line param
-	jc		TryInstallTest
+	jnc		TryInstallTest
     
-	add 	cx,2
-    call 	UpCase          ; Convert params to upper case
-	
 	mov 	si,Strings.Param1
 	call 	FindParam		; Find "OFF" cmd line param
 	jnc		TryUninstall
@@ -342,8 +347,10 @@ TryUninstall:
 
 TryInstallTest:
 	mov		ax,cs
-	add		ax,(PART_INSTALLER - PART_TSR) >> 4 + 8 + 1
+	add		ax,(PART_INSTALLER - PART_TSR) / 0x10 + 8 + 1
 	mov		word [SETUP.DisplaySeg],ax
+	mov     dx,Strings.M_TestMode
+	call    Print
 TryInstall:
 	call	DetectTsr			; Check if it's active already
 	mov		dx,Strings.E_AlreadyActive
@@ -372,9 +379,9 @@ Strings:
 	db "For additional info, visit https://github.com/cyborgyn/rbcga",10,13
 	db '$'
 .Param1:
-	db (.Param2-.Param1-1)," OFF",0
+	db (.Param2-$-1)," OFF "
 .Param2:
-	db (.Param3-.Param2-1)," TEST",0
+	db (.Param3-$-1)," TEST "
 .Param3:
 
 .M_TestMode:
