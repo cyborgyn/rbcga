@@ -68,6 +68,8 @@ start:
 	lodsb
 	cmp		al,0xff
 	jz		.wait_vrt
+	cmp		al,0xfe
+	jz		.wait_gdc
 	cmp		al,0
 	jz		screen_ready
 	mov		cl,al
@@ -79,6 +81,35 @@ start:
 	loop	.rep_out
 	jmp		.cont_setup
 
+.wait_gdc:
+        push    cx              ;use cx as a time-out loop counter
+        in      al,0x56         ;first check if the FIFO is full
+        test    al,2
+        jz      .gnb2            ;jump if not
+        mov     cx,0x8000        ;wait for FIFO not full or reasonable 
+.gnb0:   in      al,0x56         ;time, whichever happens first
+        test    al,2            ;has a slot opened up yet?
+        jz      .gnb2            ;jump if yes
+        loop    .gnb0            ;if loop count exceeded, go on anyway
+.gnb2:   mov     al,0x0d          ;issue a screen-on command to GDC
+        out     0x57,al
+        in      al,0x56         ;did that last command fill it?
+        test    al,2
+        jz      .gnb4            ;jump if not
+        mov     cx,8000h
+.gnb3:   in      al,056h         ;read status register
+        test    al,2            ;test FIFO full bit
+        jnz     .gnb4            ;jump if FIFO not full
+        loop    .gnb3            ;loop until FIFO not full or give up
+.gnb4:   mov     ax,0x40d         ;issue another screen-on, 
+        out     0x57,al         ;wait for FIFO empty
+        mov     cx,0x8000
+.gnb5:   in      al,0x56         ;read the GDC status
+        test    ah,al           ;FIFO empty bit set?
+        jnz     .gnb6            ;jump if not.
+        loop    .gnb5
+.gnb6:   pop     cx
+	jmp		.cont_setup
 ;-------------------------------
 ; Wait for vertical retrace
 ; Used during screen setup
@@ -122,11 +153,11 @@ screen_ready:
 ;-------------------------------
 ; Wait for key stroke
 ;-------------------------------
-.waitkey:
-    mov     ah,0x06             ; Console function
-    mov     dl,0xff             ; read char
-    int     0x21
-    jz      .waitkey
+;.waitkey:
+;    mov     ah,0x06             ; Console function
+;    mov     dl,0xff             ; read char
+;    int     0x21
+;    jz      .waitkey
 
 ;-------------------------------
 ; Copy picture to framebuffer
@@ -411,12 +442,7 @@ screen:
 	db 1, GDCP_IND_ADDR, GDCIR_PRAM
 	db 1, GDCP_IND_DATA, 0
 	
-	db 1, GDCP_IND_ADDR, GDCIR_MODE
-	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK
-	db 0xff		; Wait for vertical retrace IRQ
-	; Disable IRQ & enable Scroll writing
-	db 1, GDCP_IND_ADDR, GDCIR_MODE
-	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_NOBLANK
+	db 0xfe		; Wait for GDC to finish
 	; Clear screen
 	db 1, GDCP_FIFO_CMD, GDC_CMD_CURS
 	db 2, GDCP_FIFO_PAR, 0,0
@@ -425,6 +451,7 @@ screen:
 	db 1, GDCP_FIFO_CMD, 0x22
 	db 2, GDCP_FIFO_PAR, 0xff, 0xff
 	
+	db 0xfe		; Wait for GDC to finish
 	; Unblank monitor
 	db 1, GDCP_FIFO_CMD, GDC_CMD_NOBLANK
 	; Switch to Graphics Option card
