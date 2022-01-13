@@ -36,7 +36,7 @@ ReloadIRQ:
 	cli
 	mov		ax,word [OldIRQ - PART_TSR]
 	es mov	word [bx],ax
-	mov		ax,word [OldIRQ - PART_TSR+2],ax
+	mov		ax,word [OldIRQ - PART_TSR+2]
 	es mov	word [bx+2],ax
 	sti
 	pop		es
@@ -125,7 +125,7 @@ InitCGA640x200x2:
 	; Setup GDC for plane 0 unfiltered writes
 	mov		al,GDCIR_FBG		; Select Foreground/Background indirect register
 	out		GDCP_IND_ADDR,al
-	mov		al,0x0f				; Inverted foreground & background
+	mov		al,0x0f				; Inverted foreground/background
 	out		GDCP_IND_DATA,al
 	
 	mov		al,GDCIR_ALUPS		; Select ALU/PS register

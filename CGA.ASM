@@ -318,7 +318,7 @@ Main:
     call 	NormalizeArgs   ; Convert params to upper case
     
     cmp     cx,1            ; If Strings.IsNullOrEmpty(parameters)
-    jna     TryInstall
+    jbe     TryInstall
 
 	mov 	si,Strings.Param2
 	call 	FindParam		; Find "TEST" cmd line param
