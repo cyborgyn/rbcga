@@ -31,12 +31,15 @@ INT10:			; Entry point for Int10
 ;---------------------
 ; INT 10 declarations
 ;---------------------
+.F_CGA_MODESWITCH	equ 0x00
 .F_CGACOM:          equ 0xff
 .F_CGACOM_DETECT:   equ 0x00
 .Magic:             equ 'C'<<8|'G'
 ;---------------------
 ; Actual INT 10:
 ;---------------------
+	cmp		ah,.F_CGA_MODESWITCH
+	jz		.F_mode_switch
 	cmp		ah,.F_CGACOM
 	jz		.F_cga_com_functions	; ah = 'C'
 	
@@ -44,6 +47,16 @@ INT10:			; Entry point for Int10
 	db 0xEA		; JMP FAR
 .original:
 	dw 0x0000,0x0000
+
+.F_mode_switch:
+	cmp		al,0x06					; 640x200 B/W graphics (CGA,EGA,MCGA,VGA)
+	jz		.Init640x200
+	cmp		al,02					; 80x25 16 shades of gray text (CGA,EGA,MCGA,VGA)
+	jz 		.InitChar80
+	cmp		al,03					; 80x25 16 color text (CGA,EGA,MCGA,VGA)
+	jz		.InitChar80
+	stc
+	iret
 
 .F_cga_com_functions:
 	cmp		al,.F_CGACOM_DETECT
@@ -58,6 +71,17 @@ INT10:			; Entry point for Int10
 	mov		es,ax
 	mov		ax,.Magic
 	iret
+
+.Init640x200:
+	call	InitCGA640x200x2		; Defined in CGA640S.asm
+	iret
+
+.InitChar80:
+	call	InitChar80				; Defined in CGA640S.asm
+	iret
+
+%include "GDC.INC"
+%include "CGA640S.ASM"
 
 ;-----------------------------------------------------------
 ; This is the TSR installer code
@@ -134,59 +158,74 @@ UpCase:		; Converts string @ CS:SI, CX length
     ret
 
 ;-----------------------------------------------------------
-FindFirstSpace:             ;Ez az eljrs az ES:DI cmen lv PASCAL
-    push 	es              ;szer stringbl megkeresi az els SPACE
-    pop 	ds              ;karaktert, majd erre a pozcira lltja
-    xor 	cx,cx           ;DS:SI-t is. CX-ben a maradk string hossza lesz.
-    mov 	di,0x80
-    es mov 	cl,[di]
+; In the command line argument find the first ' ' (space) char
+; OUT:
+; 	- DS:SI = remaining string
+;	- CX = remaining length
+FindFirstSpace:
+	mov		ax,cs
+	mov		ds,ax
+	mov		es,ax
+    mov 	di,0x80			; ES:DI (CS:0x0080) = command line params
+    xor 	cx,cx
+    es mov 	cl,[di]			; Get parameter line length
     or 		cx,cx
-    jz 		.ExitFFS
-    inc 	di
+    jz 		.ExitFFS		; If empty, we are done
+    inc 	di				; Position to first char
     mov 	al,' '
-    repz scasb
-    sub 	di,2
+    repz scasb				; Find space
+    sub 	di,2			; step back ??Why 2??
     mov 	si,di
 .ExitFFS:
     ret
 
 ;-----------------------------------------------------------
+; Search parameter in command line arguments string
+; IN:
+;	- DS:SI: command line arguments
+;	- ES:DI: parameter definition (p)
+;	- CX: command line length (a.length)
+; OUT:
+;	- C = 0 if parameter found, 1 if not found
 FindParam:	; Searches for first commandline parameter
     push 	cx
-	push	di              ;paramtert a stringben DS:SI=paramter,
-    xor 	ax,ax           ;ES:DI=string
-    lodsb                   ;AX:=paramterhossz-1
-    dec 	ax
-    cmp 	cx,ax			;Ha a string hossza<AX, akkor itt ez a
-    jb 		.ParamNotFound  ;paramter biztos nem lesz
-    dec 	ax
-    sub 	cx,ax           ;Ismtls stringhossz-(AX-1)
-    dec 	si
+	push	di
+    xor 	ax,ax           
+    lodsb                   ; AX = [ES:DI] (p.length)
+    dec 	ax				; length--
+    cmp 	cx,ax			; If CX < p.length
+    jb 		.ParamNotFound  ; then parameter not found
+    
+	dec 	ax		;??
+    sub 	cx,ax           ; CX = a.length - p.length
+    dec 	si				; DS:SI needs to point to p.length
+
 .loop:
-    push 	cx
+    push 	cx				; Save max restart counter
 	push 	si
 	push 	di
-    xor 	cx,cx
-    lodsb                   ;Megnzzk, hogy az aktulis helytl
-    mov 	cl,al           ;nem kezddik-e egy paramterrel egyforma
-    repz 	cmpsb           ;stringrszlet
-    pop 	di
-	pop 	si
+    lodsb                   ; CX = p.length
+    mov 	cl,al           ;
+    repz 	cmpsb           ; Compare to AL till it matches
+    pop 	di				; Reset ES:DI
+	pop 	si				; Reset DS:SI
     or 		cx,cx
-    jz 		.ParamFound     ;Ha igen, megvan amit kerestnk...
-    pop 	cx
-    inc 	di              ;Ha nem, nveljk az aktulis pozcit,
-    loop 	.loop           ;s innen is megnzzk.
+    pop 	cx				; Restore restart counter
+    
+	jz 		.ParamFound     ; If CX == 0, we found the parameter
+    inc 	di              ; Start new search from next char pos
+    loop 	.loop
+
 .ParamNotFound:
     pop 	di
 	pop 	cx
-    stc						; Indicate error
+    stc						; Indicate not found
     ret
-.ParamFound:                ; No error
-    pop 	cx
+
+.ParamFound:
 	pop 	di
 	pop 	cx
-    clc
+    clc						; Indicate found
     ret
 	
 ;-----------------------------------------------------------
@@ -198,6 +237,8 @@ DetectTsr:	; ZF if present
 
 ;-----------------------------------------------------------
 ; This is the TSR uninstaller code
+; IN:
+;	- ES: TSR segment register
 DeactivateTsr:
 	push 	es						; Save TSR segment
 	; Get current int 10 interrupt vector
