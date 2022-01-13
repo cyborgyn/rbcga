@@ -2,6 +2,36 @@
 ; Functions for CGA emulator, 640x200 B/W mode, Simple Refresh
 ;----------------------------------------------------------------------------
 
+gdc_not_busy:
+        push    cx              ;use cx as a time-out loop counter
+        in      al,0x56         ;first check if the FIFO is full
+        test    al,2
+        jz      .gnb2            ;jump if not
+        mov     cx,0x8000        ;wait for FIFO not full or reasonable 
+.gnb0:   in      al,0x56         ;time, whichever happens first
+        test    al,2            ;has a slot opened up yet?
+        jz      .gnb2            ;jump if yes
+        loop    .gnb0            ;if loop count exceeded, go on anyway
+.gnb2:   mov     al,0x0d          ;issue a screen-on command to GDC
+        out     0x57,al
+        in      al,0x56         ;did that last command fill it?
+        test    al,2
+        jz      .gnb4            ;jump if not
+        mov     cx,8000h
+.gnb3:   in      al,056h         ;read status register
+        test    al,2            ;test FIFO full bit
+        jnz     .gnb4            ;jump if FIFO not full
+        loop    .gnb3            ;loop until FIFO not full or give up
+.gnb4:   mov     ax,0x40d         ;issue another screen-on, 
+        out     0x57,al         ;wait for FIFO empty
+        mov     cx,0x8000
+.gnb5:   in      al,0x56         ;read the GDC status
+        test    ah,al           ;FIFO empty bit set?
+        jnz     .gnb6            ;jump if not.
+        loop    .gnb5
+.gnb6:   pop     cx
+        ret
+
 ;----------------------------------------------------------------------------
 ; SetIRQ & ReloadIRQ
 ; IN:
@@ -21,8 +51,7 @@ SetIRQ:
 	cli
 	
 	es mov	word [bx],cx
-	mov		cx,cs
-	es mov	word [bx+2],cx
+	es mov	word [bx+2],cs
 	
 	sti
 	pop		es
@@ -64,9 +93,13 @@ InitCGA640x200x2:
 	xor		di,di
 	mov		cx,0x2000
 	xor		ax,ax
-	rep stosw					; clear 16k memory
-	
 	cld
+	rep stosw					; clear 16k memory
+    
+    ; Temporarily set up dummy IRQ handler
+	mov		cx,(wait_irq_handler - PART_TSR)
+	call	SetIRQ
+	
 	mov		si,(screen640x200 - PART_TSR)
 	xor		cx,cx
 	xor		dx,dx
@@ -75,7 +108,7 @@ InitCGA640x200x2:
 	cmp		al,0xff
 	jz		.wait_vrt
 	cmp		al,0
-	jz		.screen_ready
+	jz		screen_ready
 	mov		cl,al
 	lodsb
 	mov		dl,al
@@ -88,29 +121,26 @@ InitCGA640x200x2:
 ;-------------------------------
 ; Wait for vertical retrace
 ; Used during screen setup
-;-------------------------------
 .wait_vrt:						; Wait a vertical retrace IRQ
-	cli
 	xor		ax,ax				; Save the old IRQ vector, and
 	mov		byte [irq_handled - PART_TSR],al
-	mov		cx,(wait_irq_handler - PART_TSR)	; Set our new, wait IRQ handler
-	
-	call	SetIRQ
-	
+
 	mov 	cx,8000				; time-out after 8000 cycles
-	sti
 .do_wait:
 	test	byte [irq_handled - PART_TSR],0xff
 	jz		.irq_handled
-	loop	.do_wait
+	loop    .do_wait
 .irq_handled:
-	
-	call	ReloadIRQ			; Restore old IRQ handler
-	
+	call    gdc_not_busy
+
 	xor 	cx,cx
 	jmp		.cont_setup
 
-.screen_ready:
+;-------------------------------
+; Screen is ready, we can set up
+; IRQ handler
+screen_ready:
+	call	ReloadIRQ			; Restore old IRQ handler
 	mov		cx,(VRetrace640x480S - PART_TSR)
 	call	SetIRQ
 	
@@ -138,8 +168,8 @@ InitCGA640x200x2:
 	out 	GDCP_IND_DATA,al
 	; A-- This can be moved to the declarative part --A
 	
-	mov		word [REGSTORE.SS - PART_TSR],ss		; #18
-	mov		word [REGSTORE.SP - PART_TSR],sp		; #18
+	cs mov	word [REGSTORE.SS - PART_TSR],ss		; #18
+	cs mov	word [REGSTORE.SP - PART_TSR],sp		; #18
 	mov		sp,cs									; #2
 	mov		ss,sp									; #2
 	mov		sp,(IrqStack.Top - PART_TSR)+4*2		; #4
@@ -153,16 +183,10 @@ InitCGA640x200x2:
 	mov		ax,word [(SETUP.DisplaySeg - PART_TSR)]
 	push	ax
 
-	mov		ss,word [REGSTORE.SS - PART_TSR]		; #18
-	mov		sp,word [REGSTORE.SP - PART_TSR]		; #18
+	cs mov	ss,word [REGSTORE.SS - PART_TSR]		; #18
+	cs mov	sp,word [REGSTORE.SP - PART_TSR]		; #18
 	
 	; Wait until GDC is ready
-.wait_gdc_ready:
-	in      al,GDCP_STATUS		; read the GDC status
-	test    al,0x20             ; In vertical sync?
-	jz      .wait_gdc_ready    	; wait if not.
-	test    al,0x04		        ; FIFO empty & Vertical sync bit set?
-	jz      .wait_gdc_ready    	; wait if not.
 	
 	mov		al,GDCIR_MODE
 	out		GDCP_IND_ADDR,al
@@ -212,11 +236,15 @@ InitChar80:
 	pop 	ax					; Restore saved registers
 	ret
 
+Handling:   db 0
 ;----------------------------------------------------------------------------
 ; Vertical Retrace IRQ handler:
 ; Copy 3 scan lines at a time to GDC
 ;----------------------------------------------------------------------------
 VRetrace640x480S:
+    cs test byte [Handling - PART_TSR],1
+    jnz     .Exit
+    cs mov  byte [Handling - PART_TSR],1
 	cs mov	word [REGSTORE.SS - PART_TSR],ss		; #18
 	cs mov	word [REGSTORE.SP - PART_TSR],sp		; #18
 	mov		sp,cs									; #2
@@ -230,6 +258,12 @@ VRetrace640x480S:
 	push	di
 	push	ds										; #14 * 2
 	push	es
+	
+	; Check if IRQ is vertical retrace
+	in      al,GDCP_STATUS
+	test    al,0x20
+	jz      .CancelIrq
+	
 	mov 	ax,sp									; #2
 	mov		sp,(IrqStack.Top - PART_TSR)			; #4
 	
@@ -270,7 +304,6 @@ VRetrace640x480S:
 	
 	; We gained 50+ cycles by eliminating cursor positioning in GDC
 	xchg	si,di				; # 4 | Continue with the odd/even other lines
-	cli
 	; each line is 80 (5x16) bytes long
 	mov		cl,5
 .nextBytesInLine:
@@ -327,7 +360,6 @@ VRetrace640x480S:
 	                            ; =48 cycles
 	loop	.nextBytesInLine    ; #17 |
 	                            ; =469 cycles / 16 bytes (overhead = 133) -> 2345 cycles / line
-	sti
 	pop		cx
 	dec 	bx					; If all 200 scan lines finished,
 	jz		.restart			; We need to restart
@@ -343,6 +375,8 @@ VRetrace640x480S:
 	push	ds		; CGA framebuffer segment
 	
 	mov 	sp,ax	; Restore registers from different position ; #2
+	
+.CancelIrq:
 	pop		es									; #12 * 8
 	pop		ds
 	pop		di
@@ -354,6 +388,8 @@ VRetrace640x480S:
 	cs mov	ss,word [REGSTORE.SS - PART_TSR]	; #17 | Original application stack segment & pointer
 	cs mov	sp,word [REGSTORE.SP - PART_TSR]	; #17
 												; Total = #144
+    cs mov  byte [Handling - PART_TSR],0
+.Exit:
 	iret
 
 .restart:
@@ -381,8 +417,12 @@ screen640x200:
 	; Set GDC mode
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
 	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_PLANE0 | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_BLANK
+	; Set vsync to generate (master mode)
+	db 1, GDCP_FIFO_CMD, GDC_CMD_VSYNC | SYNC_MASTER
 	; Start display
 	db 1, GDCP_FIFO_CMD, GDC_CMD_START
+	; Reset the video card
+	db 1, GDCP_RESET, 0x00
 	; Set zoom to none
 	db 1, GDCP_FIFO_CMD, GDC_CMD_ZOOM
 	db 1, GDCP_FIFO_PAR, 0
@@ -397,10 +437,6 @@ screen640x200:
 	; Setup cursor (hide it)
 	db 1, GDCP_FIFO_CMD, GDC_CMD_CCHAR
 	db 3, GDCP_FIFO_PAR, 0x00, 0x00, 0x00
-	; Set vsync to generate (master mode)
-	db 1, GDCP_FIFO_CMD, GDC_CMD_VSYNC | SYNC_MASTER
-	; Reset the video card
-	db 1, GDCP_RESET, 0x00
 	; Enable IRQ
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
 	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_PLANE0 | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_BLANK
@@ -447,10 +483,7 @@ screen640x200:
 	db 0xdf     ;v      ,dk green
 	db 0xe7     ;dkgrey ,grey	; [red,green]
 	
-	; Enable IRQ
-	db 1, GDCP_IND_ADDR, GDCIR_MODE
-	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_BLANK
-	db 0xff		; Wait for vertical retrace IRQ
+	db 0xff		; Wait for gdc not busy
 	; Disable IRQ & enable Scroll writing
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
 	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_SCROLL | GDCM_NOINT | GDCM_BLANK
@@ -477,6 +510,8 @@ screen640x200:
 	; Disable scroll write
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
 	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_NOBLANK
+	
+	db 0xff		; Wait for gdc not busy
 	
 	; Initialize pattern multiplier to 1 (negated)
 	db 1, GDCP_IND_ADDR, GDCIR_PTRN_MUL
@@ -507,12 +542,6 @@ screen640x200:
 	db 1, GDCP_IND_ADDR, GDCIR_PRAM
 	db 1, GDCP_IND_DATA, 0
 	
-	db 1, GDCP_IND_ADDR, GDCIR_MODE
-	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK
-	db 0xff		; Wait for vertical retrace IRQ
-	; Disable IRQ & enable Scroll writing
-	db 1, GDCP_IND_ADDR, GDCIR_MODE
-	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_NOBLANK
 	; Clear screen
 	db 1, GDCP_FIFO_CMD, GDC_CMD_CURS
 	db 2, GDCP_FIFO_PAR, 0,0
@@ -520,6 +549,8 @@ screen640x200:
 	db 3, GDCP_FIFO_PAR, 2, 0xff, 0xff
 	db 1, GDCP_FIFO_CMD, 0x22
 	db 2, GDCP_FIFO_PAR, 0xff, 0xff
+	
+	db 0xff		; Wait for gdc not busy
 	
 	; Unblank monitor
 	db 1, GDCP_FIFO_CMD, GDC_CMD_NOBLANK
