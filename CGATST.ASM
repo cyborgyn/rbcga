@@ -33,6 +33,19 @@ start:
     int     0x21
 
 ;-------------------------------
+; Detect CGA.com
+;-------------------------------
+	mov 	ax,'C'<<8|'G'
+	int		0x10
+	cmp		ax,INT10.Magic
+	jnz		.CGACOM_NotPresent
+	
+	mov		ax,0xff01			; Get display segment
+	int 	0x10
+	mov		word [display],ax
+
+.CGACOM_NotPresent:
+;-------------------------------
 ; Setup screen
 ;-------------------------------
     mov     ah,0x0b             ; Set color palette
@@ -45,7 +58,7 @@ start:
 ;-------------------------------
 ; Copy picture data
 ;-------------------------------
-    mov     ax,0xb800           ; CGA EVEN lines mem
+    mov     ax,[display]        ; CGA EVEN lines mem (normally B800h)
     mov     es,ax
     mov     si,picture+80
     cld                         ; Direction flag=0, for movsb
@@ -63,9 +76,9 @@ start:
     loop .copy_lines
     
     mov     ax,es
-    cmp     ax,0xb800           ; Are we done?
+    cmp     ax,[display]        ; Are we done?
     jnz     .waitkey
-    mov     ax,0xba00           ; Copy odd lines as well
+    add 	ax,0x200            ; Copy odd lines as well
     mov     es,ax
     mov     si,picture          ; Odd lines source address
     jmp .copy_plane
@@ -90,6 +103,8 @@ start:
     mov     ax,0x4C00           ; Exit to DOS
     int     0x21
 
+display:
+	dw 0xb800
 filename:
     db "rainbow.raw",0
 picture:

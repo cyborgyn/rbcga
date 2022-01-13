@@ -34,6 +34,7 @@ INT10:			; Entry point for Int10
 .F_CGA_MODESWITCH	equ 0x00
 .F_CGACOM:          equ 0xff
 .F_CGACOM_DETECT:   equ 0x00
+.F_CGACOM_DISPSEG:	equ 0x01
 .Magic:             equ 'C'<<8|'G'
 ;---------------------
 ; Actual INT 10:
@@ -59,11 +60,17 @@ INT10:			; Entry point for Int10
 	iret
 
 .F_cga_com_functions:
-	cmp		al,.F_CGACOM_DETECT
-	jz		.F_detection_function	; al = 00
+	cmp		al,.F_CGACOM_DISPSEG
+	jb		.F_detection_function	; al = 00
+	jz		.F_get_siplay_segment	; al = 01
 	stc
 	iret
 
+	; Returns AX=currently used display segment
+.F_get_siplay_segment:
+	mov		ax,[SETUP.DisplaySeg - PART_TSR]
+	iret
+	
 	; Returns AX=magic, BX=version, ES=TSR segment
 .F_detection_function:
 	mov		bx,VERSION
@@ -79,6 +86,10 @@ INT10:			; Entry point for Int10
 .InitChar80:
 	call	InitChar80				; Defined in CGA640S.asm
 	iret
+
+SETUP:
+.DisplaySeg:
+	dw		0xb800					; This defaults to B800
 
 %include "GDC.INC"
 %include "CGA640S.ASM"
@@ -118,8 +129,19 @@ PART_INSTALLER:
 	; and exit remaining resident
 	mov		dx,Strings.M_Activated
 	call    Print
+	
+	; If TSR is configured in test mode,
+	; display mem comes right after the TSR
+	cmp 	[SETUP.DisplaySeg - PART_TSR],0xb800
+	jz		.StandardMemory
+
+	; The memory size = TSR + 16k display ram
+	mov		dx,(PART_INSTALLER - PART_TSR) / 0x10 + 8 + 1 + 0x400
+	jmp 	.Exit
+.StandardMemory:
 	; The memory size in pragraphs to reserve
 	mov		dx,(PART_INSTALLER - PART_TSR) / 0x10 + 8 + 1
+.Exit
 	mov		ax,0x3100
 	int		0x21
 
@@ -280,6 +302,10 @@ Main:
 	call 	FindFirstSpace
     or 		cx,cx      		; If Strings.IsNullOrEmpty(parameters)
     jz 		TryInstall
+
+	mov 	si,Strings.Param2
+	call 	FindParam		; Find "TEST" cmd line param
+	jc		TryInstallTest
     
 	add 	cx,2
     call 	UpCase          ; Convert params to upper case
@@ -313,7 +339,11 @@ TryUninstall:
 	
 	mov		dx,Strings.M_Deactivated
 	jmp 	ExitWithMessage		; Else confirm with msg that it's deactivate
-	
+
+TryInstallTest:
+	mov		ax,cs
+	add		ax,(PART_INSTALLER - PART_TSR) >> 4 + 8 + 1
+	mov		word [SETUP.DisplaySeg],ax
 TryInstall:
 	call	DetectTsr			; Check if it's active already
 	mov		dx,Strings.E_AlreadyActive
@@ -325,6 +355,7 @@ TryInstall:
 	; 	- Graphics option
 	; 	- Revision
 	; TODO: check CodeBlue is running
+
 	jmp     PART_INSTALLER
 
 Strings:
@@ -336,12 +367,18 @@ Strings:
 	db "  Usage: CGA.COM [command]",10,13
 	db "  without parameters.....: Activate CGA.COM emulator",10,13
 	db "  Possible commands:",10,13
+	db "  TEST...................: Activate in test mode",10,13
 	db "  OFF....................: Deactivate",10,13,10,13
 	db "For additional info, visit https://github.com/cyborgyn/rbcga",10,13
 	db '$'
 .Param1:
 	db (.Param2-.Param1-1)," OFF",0
 .Param2:
+	db (.Param3-.Param2-1)," TEST",0
+.Param3:
+
+.M_TestMode:
+	db "  CGA.COM in test mode is not accessible to ordinary applications.",10,13,'$'
 .M_Deactivated:
 	db "  CGA.COM deactivated.",10,13,'$'
 .M_Activated:
