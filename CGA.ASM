@@ -137,7 +137,9 @@ PART_INSTALLER:
 	; Calculate size of TSR memory needed,
 	; and exit remaining resident
 	mov		dx,Strings.M_Activated
+	push	ds
 	call    Print
+	pop		ds
 	
 	; If TSR is configured in test mode,
 	; display mem comes right after the TSR
@@ -223,7 +225,7 @@ NormalizeArgs:
 ;	- DS:SI: parameter definition (p)
 ;	- ES:DI: command line arguments
 ; OUT:
-;	- C = 0 if parameter found, 1 if not found
+;	- C = 1 if parameter found, 0 if not found
 FindParam:	; Searches for first commandline parameter
     push 	cx
 	push	di
@@ -256,13 +258,13 @@ FindParam:	; Searches for first commandline parameter
 .ParamNotFound:
     pop 	di
 	pop 	cx
-    stc						; Indicate not found
+    clc						; Indicate not found
     ret
 
 .ParamFound:
 	pop 	di
 	pop 	cx
-    clc						; Indicate found
+    stc						; Indicate found
     ret
 	
 ;-----------------------------------------------------------
@@ -322,11 +324,11 @@ Main:
 
 	mov 	si,Strings.Param2
 	call 	FindParam		; Find "TEST" cmd line param
-	jnc		TryInstallTest
+	jc		TryInstallTest
     
 	mov 	si,Strings.Param1
 	call 	FindParam		; Find "OFF" cmd line param
-	jnc		TryUninstall
+	jc		TryUninstall
 	
 	mov		dx,Strings.Help
 

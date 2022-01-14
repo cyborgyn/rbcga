@@ -303,6 +303,7 @@ VRetrace640x480S:
     mov     dl,bh               ; # 2 | DX = GDCP_FIFO_PAR
 	                            ; BL = Write Buffer port, BH = FIFO port
 	mov		cx,4				; In 1 VRetrace we display 2 can lines
+	cld
 	
 	; At least 286 cycles up to this point, only initialization
 	
@@ -392,6 +393,7 @@ VRetrace640x480S:
 	push	di		; Even scan line pointer
 	push	si		; Odd scan line pointer
 	push	ds		; CGA framebuffer segment
+	
 	mov 	sp,ax	; Restore registers from different position ; #2
 	
 	pop     bp
