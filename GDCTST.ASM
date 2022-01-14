@@ -86,28 +86,24 @@ start:
         in      al,0x56         ;first check if the FIFO is full
         test    al,2
         jz      .gnb2            ;jump if not
-        mov     cx,0x8000        ;wait for FIFO not full or reasonable 
 .gnb0:   in      al,0x56         ;time, whichever happens first
         test    al,2            ;has a slot opened up yet?
-        jz      .gnb2            ;jump if yes
-        loop    .gnb0            ;if loop count exceeded, go on anyway
+        jnz      .gnb0            ;jump if yes
 .gnb2:   mov     al,0x0d          ;issue a screen-on command to GDC
         out     0x57,al
         in      al,0x56         ;did that last command fill it?
         test    al,2
         jz      .gnb4            ;jump if not
-        mov     cx,8000h
-.gnb3:   in      al,056h         ;read status register
+        mov     cx,0x8000
+.gnb3:   in      al,0x56         ;read status register
         test    al,2            ;test FIFO full bit
         jnz     .gnb4            ;jump if FIFO not full
         loop    .gnb3            ;loop until FIFO not full or give up
 .gnb4:   mov     ax,0x40d         ;issue another screen-on, 
         out     0x57,al         ;wait for FIFO empty
-        mov     cx,0x8000
 .gnb5:   in      al,0x56         ;read the GDC status
         test    ah,al           ;FIFO empty bit set?
-        jnz     .gnb6            ;jump if not.
-        loop    .gnb5
+        jz     .gnb5            ;jump if not.
 .gnb6:   pop     cx
 	jmp		.cont_setup
 ;-------------------------------
@@ -125,17 +121,16 @@ start:
 	es mov	cx,word [bx+2]
 	push	cx
 	
-	mov		cx,cs				; Write our new, wait IRQ handler
-	es mov	word [bx],cx
 	mov		cx,wait_irq_handler
-	es mov	word [bx+2],cx
+	es mov	word [bx],cx
+	es mov	word [bx+2],cs
 	
-	mov 	cx,8000				; time-out after 8000 cycles
+	mov 	cx,0xffff			; time-out after 8000 cycles
 	sti
 .do_wait:
 	test	byte [irq_handled],0xff
 	jz		.irq_handled
-	loop	.do_wait
+	jmp	    .do_wait
 .irq_handled:
 	cli
 	pop		cx
@@ -343,6 +338,7 @@ screen:
 	; Disable IRQ
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
 	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_PLANE0 | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_BLANK
+	db 0xfe     ; Wait for GDC ready
 	; Load color map
 	db 1, GDCP_IND_ADDR, GDCIR_COLOR
 	db 32,GDCP_IND_DATA
@@ -382,6 +378,7 @@ screen:
 	db 0xdf     ;v      ,dk green
 	db 0xe7     ;dkgrey ,grey	; [red,green]
 	
+	db 0xfe
 	; Enable IRQ
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
 	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_BLANK
@@ -411,6 +408,10 @@ screen:
 	db 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff
 	; Disable scroll write
 	db 1, GDCP_IND_ADDR, GDCIR_MODE
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK
+	db 0xff		; Wait for vertical retrace IRQ
+	; Disable IRQ & enable Scroll writing
+	db 1, GDCP_IND_ADDR, GDCIR_MODE
 	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_NOBLANK
 	
 	; Initialize pattern multiplier to 1 (negated)
@@ -435,6 +436,15 @@ screen:
 	db 1, GDCP_WMASK, 0
 	db 1, GDCP_WMASK_H, 0
 	
+	db 0xfe
+	; Enable IRQ
+	db 1, GDCP_IND_ADDR, GDCIR_MODE
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK
+	db 0xff		; Wait for vertical retrace IRQ
+	; Disable IRQ & enable Scroll writing
+	db 1, GDCP_IND_ADDR, GDCIR_MODE
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_NOBLANK
+	
 	; Fill WriteBuffer with 0 inverted
 	db 1, GDCP_IND_ADDR, GDCIR_PRAM
 	db 1, GDCP_IND_DATA, 0
@@ -452,6 +462,13 @@ screen:
 	db 2, GDCP_FIFO_PAR, 0xff, 0xff
 	
 	db 0xfe		; Wait for GDC to finish
+	; Enable IRQ
+	db 1, GDCP_IND_ADDR, GDCIR_MODE
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK
+	db 0xff		; Wait for vertical retrace IRQ
+	; Disable IRQ & enable Scroll writing
+	db 1, GDCP_IND_ADDR, GDCIR_MODE
+	db 1, GDCP_IND_DATA, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_NOBLANK
 	; Unblank monitor
 	db 1, GDCP_FIFO_CMD, GDC_CMD_NOBLANK
 	; Switch to Graphics Option card
