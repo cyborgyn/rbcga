@@ -304,7 +304,7 @@ VRetrace640x480S:
 	; All 8000 bytes are packed next to each other
 	; starting from DS:SI
 	
-	mov		cx,2				; In 1 VRetrace we display 3 can lines
+	mov		cx,2				; In 1 VRetrace we display 2 can lines
 .nextLine:
 	push	cx
 	
