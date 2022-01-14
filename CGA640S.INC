@@ -302,7 +302,7 @@ VRetrace640x480S:
 	xor     dh,dh
     mov     dl,bh               ; # 2 | DX = GDCP_FIFO_PAR
 	                            ; BL = Write Buffer port, BH = FIFO port
-	mov		cx,2				; In 1 VRetrace we display 2 can lines
+	mov		cx,4				; In 1 VRetrace we display 2 can lines
 	
 	; At least 286 cycles up to this point, only initialization
 	
@@ -427,7 +427,7 @@ screen640x200:
         ; Mode, words/line-2, HSync+VSync, VSync+HFrontPorch, HBackPorch,
         ; VFrontPorch, Active lines, AltiveLines + VBackPorch
         ; 640x200
-        db 8, GDCP_FIFO_PAR, 0x06, 0x26, 0x64, 0x1c, 0x08, 0x0d, 0xc8, 0x50
+        db 8, GDCP_FIFO_PAR, 0x06, 0x26, 0x64, 0x1c, 0x08, 0x0d, 0xc8, 0x98 ;0x50
         ; The pitch (RAM line width) is 40 words = 640 pixels
         db 1, GDCP_FIFO_CMD, GDC_CMD_PITCH
         db 1, GDCP_FIFO_PAR, 0x28
