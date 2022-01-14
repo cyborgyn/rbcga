@@ -255,7 +255,7 @@ VRetrace640x480S:
 	mov		sp,cs									; #2
 	mov		ss,sp									; #2
 	mov		sp,(IrqStack.Regs - PART_TSR)			; #4
-	push	ax										; #15 * 6
+	push	ax										; #15 * 7
 	push	bx
 	push	cx
 	push	dx
@@ -263,24 +263,24 @@ VRetrace640x480S:
 	push	di
 	push	ds										; #14 * 2
 	push	es
+	push    bp
 	
 	mov 	ax,sp									; #2
 	mov		sp,(IrqStack.Top - PART_TSR)			; #4
 	
 	; Restore IRQ state
-	pop		ds		; CGA frame buffer segment
+	pop		ds		; CGA frame buffer segment      ; #12 * 4
 	pop		si		; Odd scan line pointer
 	pop		di		; Even scan line pointer
-	pop		bx		; Line count down counter
+	pop		bp		; Line count down counter
 	
 	push	ax		; save register file SP			; #15
-													; Total = #183
-	; Register Backup-restore total = 327
+													; Total = #240
 	
-	; Turn off DGC interrupts
-	mov		al,GDCIR_MODE
+	; Turn off DGC interrupts   ; Total = # 34
+	mov		ax,GDCIR_MODE + (GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_NOBLANK) * 0x100
 	out		GDCP_IND_ADDR,al
-	mov		al, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_NOBLANK
+	mov		al,ah
 	out		GDCP_IND_DATA,al
 	
 	; Save registers
@@ -298,13 +298,18 @@ VRetrace640x480S:
 	; push-pop: 3*(15+12) = 81
 	
 	; Initialize a few registers
-	mov 	dx,GDCP_PRAM		; We will use it in the loop as out port
+	mov 	bx,GDCP_PRAM+(GDCP_FIFO_PAR<<8)		; We will use it in the loop as out port
+	xor     dh,dh
+    mov     dl,bh               ; # 2 | DX = GDCP_FIFO_PAR
+	                            ; BL = Write Buffer port, BH = FIFO port
+	mov		cx,4				; In 1 VRetrace we display 2 can lines
+	
+	; At least 286 cycles up to this point, only initialization
 	
 	; First copy even lines, from BA00:0000
 	; All 8000 bytes are packed next to each other
 	; starting from DS:SI
-	
-	mov		cx,2				; In 1 VRetrace we display 3 can lines
+
 .nextLine:
 	push	cx
 	
@@ -313,17 +318,18 @@ VRetrace640x480S:
 	; each line is 80 (5x16) bytes long
 	mov		cl,5
 .nextBytesInLine:
-
 	; Prepare the GDC to write from Write Buffer
 	mov		ax,0x0200+GDC_CMD_FIGS	; # 4 |
 	out		GDCP_FIFO_CMD,al    ; #14 |
 	mov		al,ah				; # 2 | Direction 2, WDAT will come
-	out		GDCP_FIFO_PAR,al    ; #14 |
+	out		dx,al               ; #12 | Here the DX should be GDCP_FIFO_PAR
 	mov		ax,7				; # 4 | 8 words waiting in Write Buffer
-	out		GDCP_FIFO_PAR,al    ; #14 |
+	out		dx,al               ; #12 |
 	mov		al,ah               ; # 2 |
-	out		GDCP_FIFO_PAR,al    ; #14 |
-	                            ; =68 cycles
+	out		dx,al               ; #12 |
+	
+	mov     dl,bl               ; # 2 | DX = GDCP_PRAM
+	                            ; Total= #62
 	
 	lodsw                       ; Write 16 bytes to Write Buffer
 	out		dx,al               ; #21 / byte = 336 Cycles
@@ -360,33 +366,35 @@ VRetrace640x480S:
 	
 	mov		ax,GDC_CMD_WDAT | D_REPLACE | D_WORD +0xff00	; # 4 |
 	out		GDCP_FIFO_CMD,al	; #14 | Start the write
+	mov     dl,bh               ; # 2 | DX = GDCP_FIFO_PAR
 	mov		al,ah				; # 2 | Set write mask, only LSB is used anyways...
-	out		GDCP_FIFO_PAR,al    ; #14 |
-	out		GDCP_FIFO_PAR,al    ; #14 |
-	                            ; =48 cycles
+	out		dx,al               ; #12 |
+	out		dx,al               ; #12 |
+	                            ; =46 cycles
 	loop	.nextBytesInLine    ; #17 |
-	                            ; =469 cycles / 16 bytes (overhead = 133) -> 2345 cycles / line
+	                            ; =461 cycles / 16 bytes (overhead = 125) -> 2305 cycles / line
 	pop		cx
-	dec 	bx					; If all 200 scan lines finished,
+	dec 	bp					; If all 200 scan lines finished,
 	jz		.restart			; We need to restart
-	loop	.nextLine
+	loop	.nextLine           ; #17 |
 	
 .irq_finished:
 	; Turn on DGC interrupts again
-	mov		al,GDCIR_MODE
+	mov		ax,GDCIR_MODE + (GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK) * 0x100
 	out		GDCP_IND_ADDR,al
-	mov		al, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK
+	mov		al,ah
 	out		GDCP_IND_DATA,al
 
 	pop 	ax		; Stack pointer where the registers are		; #12
 	
 	; Save internal state
-	push	bx		; Line count down counter	| #12 * 4
+	push	bp		; Line count down counter	| #12 * 4
 	push	di		; Even scan line pointer
 	push	si		; Odd scan line pointer
 	push	ds		; CGA framebuffer segment
 	mov 	sp,ax	; Restore registers from different position ; #2
 	
+	pop     bp
 	pop		es									; #12 * 8
 	pop		ds
 	pop		di
@@ -410,7 +418,7 @@ VRetrace640x480S:
 	
 	mov		si,0x2000			; Reset pointers + counter
 	mov		di,0
-	mov		bx,200
+	mov		bp,200
 	
 	jmp 	.irq_finished
 
@@ -419,7 +427,7 @@ screen640x200:
         ; Mode, words/line-2, HSync+VSync, VSync+HFrontPorch, HBackPorch,
         ; VFrontPorch, Active lines, AltiveLines + VBackPorch
         ; 640x200
-        db 8, GDCP_FIFO_PAR, 0x06, 0x26, 0x64, 0x1c, 0x08, 0x0d, 0xc8, 0x50
+        db 8, GDCP_FIFO_PAR, 0x06, 0x26, 0x64, 0x1c, 0x08, 0x0d, 0xc8, 0x98 ;0x50
         ; The pitch (RAM line width) is 40 words = 640 pixels
         db 1, GDCP_FIFO_CMD, GDC_CMD_PITCH
         db 1, GDCP_FIFO_PAR, 0x28
