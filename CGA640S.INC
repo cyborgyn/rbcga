@@ -91,33 +91,39 @@ InitCGA640x200x2:
 	jmp		.cont_setup
 
 .wait_gdc_ready:
-        push    cx              ;use cx as a time-out loop counter
-        in      al,0x56         ;first check if the FIFO is full
-        test    al,2
-        jz      .gnb2            ;jump if not
-        mov     cx,0x8000        ;wait for FIFO not full or reasonable 
-.gnb0:   in      al,0x56         ;time, whichever happens first
-        test    al,2            ;has a slot opened up yet?
-        jz      .gnb2            ;jump if yes
-        loop    .gnb0            ;if loop count exceeded, go on anyway
-.gnb2:   mov     al,0x0d          ;issue a screen-on command to GDC
-        out     0x57,al
-        in      al,0x56         ;did that last command fill it?
-        test    al,2
-        jz      .gnb4            ;jump if not
-        mov     cx,0x8000
-.gnb3:   in      al,0x56         ;read status register
-        test    al,2            ;test FIFO full bit
-        jnz     .gnb4            ;jump if FIFO not full
-        loop    .gnb3            ;loop until FIFO not full or give up
-.gnb4:   mov     ax,0x40d         ;issue another screen-on, 
-        out     0x57,al         ;wait for FIFO empty
-        mov     cx,0x8000
-.gnb5:   in      al,0x56         ;read the GDC status
-        test    ah,al           ;FIFO empty bit set?
-        jnz     .gnb6            ;jump if not.
-        loop    .gnb5
-.gnb6:   pop     cx
+    push    cx              ;use cx as a time-out loop counter
+    in      al,0x56         ;first check if the FIFO is full
+    test    al,2
+    jz      .gnb2            ;jump if not
+    mov     cx,0x8000        ;wait for FIFO not full or reasonable 
+.gnb0:
+    in      al,0x56         ;time, whichever happens first
+    test    al,2            ;has a slot opened up yet?
+    jz      .gnb2            ;jump if yes
+    loop    .gnb0            ;if loop count exceeded, go on anyway
+.gnb2:
+    mov     al,0x0d          ;issue a screen-on command to GDC
+    out     0x57,al
+    in      al,0x56         ;did that last command fill it?
+    test    al,2
+    jz      .gnb4            ;jump if not
+    mov     cx,0x8000
+.gnb3:
+    in      al,0x56         ;read status register
+    test    al,2            ;test FIFO full bit
+    jnz     .gnb4            ;jump if FIFO not full
+    loop    .gnb3            ;loop until FIFO not full or give up
+.gnb4:
+    mov     ax,0x40d         ;issue another screen-on, 
+    out     0x57,al         ;wait for FIFO empty
+    mov     cx,0x8000
+.gnb5:
+    in      al,0x56         ;read the GDC status
+    test    ah,al           ;FIFO empty bit set?
+    jnz     .gnb6            ;jump if not.
+    loop    .gnb5
+.gnb6:
+    pop     cx
     jmp     .cont_setup
 
 ;-------------------------------
@@ -217,7 +223,9 @@ InitChar80:
 	push	ax					; Save used registers
 	push	bx
 	push	es
-
+    
+    ; TODO: this could occasionally not work: Need to sync up with the IRQ handler
+    
 	; Turning off vertical retrace IRQ, blanking graphics screen
 	mov		al,GDCIR_MODE
 	out		GDCP_IND_ADDR,al
@@ -241,6 +249,7 @@ InitChar80:
 ; Copy 3 scan lines at a time to GDC
 ;----------------------------------------------------------------------------
 VRetrace640x480S:
+    cli
 	cs mov	word [REGSTORE.SS - PART_TSR],ss		; #18
 	cs mov	word [REGSTORE.SP - PART_TSR],sp		; #18
 	mov		sp,cs									; #2
@@ -295,7 +304,7 @@ VRetrace640x480S:
 	; All 8000 bytes are packed next to each other
 	; starting from DS:SI
 	
-	mov		cx,3				; In 1 VRetrace we display 3 can lines
+	mov		cx,2				; In 1 VRetrace we display 3 can lines
 .nextLine:
 	push	cx
 	
@@ -389,7 +398,7 @@ VRetrace640x480S:
 	cs mov	ss,word [REGSTORE.SS - PART_TSR]	; #17 | Original application stack segment & pointer
 	cs mov	sp,word [REGSTORE.SP - PART_TSR]	; #17
 												; Total = #144
-.Exit:
+	sti
 	iret
 
 .restart:
@@ -410,7 +419,7 @@ screen640x200:
         ; Mode, words/line-2, HSync+VSync, VSync+HFrontPorch, HBackPorch,
         ; VFrontPorch, Active lines, AltiveLines + VBackPorch
         ; 640x200
-        db 8, GDCP_FIFO_PAR, 0x02, 0x26, 0x64, 0x1c, 0x08, 0x0d, 0xc8, 0x50
+        db 8, GDCP_FIFO_PAR, 0x06, 0x26, 0x64, 0x1c, 0x08, 0x0d, 0xc8, 0x50
         ; The pitch (RAM line width) is 40 words = 640 pixels
         db 1, GDCP_FIFO_CMD, GDC_CMD_PITCH
         db 1, GDCP_FIFO_PAR, 0x28
