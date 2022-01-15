@@ -20,5 +20,37 @@ It's in Proof-of-concept state. Right now, it can emulate on real hardware CGA h
 - CGA 320x200 4 color modes
 - BIOS character bitmaps not found in Rainbow @ FFA6E-FFE6E (it's a ROM area)
 
-## How to build it
+## How to build it under DOS
+Tools needed:
+- TinyAsm in your PATH: https://github.com/nanochess/tinyasm
 
+Under DOS prompt, jut run
+```
+C:\RBCGA>BUILD.BAT
+```
+This also works in MSDOS under Rainbow itself.
+
+## How to build it under LINUX
+Tools needed:
+- Netwide Assembler in you path: https://www.nasm.us/
+
+In the proper directory, just run
+```
+# build.sh
+```
+
+# How to use it
+You will most probably also need to run CodeBlue PC emulator first:
+```
+> cb.exe /af c:\command.com
+```
+Then start the cga emulator:
+```
+> CGA.COM
+```
+
+If you are finished running your CGA application, just uninstall CGA.COM:
+```
+> CGA.COM OFF
+```
+That's all for now.
