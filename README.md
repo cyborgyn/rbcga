@@ -1,6 +1,6 @@
 # CGA Emulator for DEC Rainbow 100B
 
-It's in Proof-of-concept state. Right now, it can emulate on real hardware CGA hi-res mode, by copying/refreshing the usual RAM Framebuffer to the Graphics Option's RAM to display. It steals 10-12% CPU time for that with the help of GDC's Verticla Retrace IRQ, and finishes in 50 retraces with a full screen. Since the Vertical freq is around 55Hz-60Hz, it's a around 1 frame/s (a tiny little bit more).
+It's in Proof-of-concept state. Right now, it can emulate on real hardware CGA hi-res mode, by copying/refreshing the usual RAM Framebuffer to the Graphics Option's RAM to display. It steals around 12% CPU time for that with the help of GDC's Verticla Retrace IRQ, and finishes in 50 retraces with a full screen. Since the Vertical freq is around 60Hz, it's a around 1.2 frame/s (a tiny little bit more).
 
 ## Features
 - Partial INT 10h handling
@@ -54,3 +54,8 @@ If you are finished running your CGA application, just uninstall CGA.COM:
 > CGA.COM OFF
 ```
 That's all for now.
+
+## Files list
+- CGA.COM this is the emulator
+- CGATST.COM this a small quick tester application which runs on any DOS platform with CGA to display an image
+- GDCTST.COM this is just a quick example how to program Graphics Option on Rainbow, and test with the same image
