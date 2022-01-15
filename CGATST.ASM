@@ -35,14 +35,14 @@ start:
 ;-------------------------------
 ; Detect CGA.com
 ;-------------------------------
-	mov 	ax,0xff00           ; Detect command
-	int		0x10
-	cmp		ax,'C'<<8|'G'
-	jnz		.CGACOM_NotPresent
-	
-	mov		ax,0xff01			; Get display segment
-	int 	0x10
-	mov		word [display],ax
+    mov     ax,0xff00           ; Detect command
+    int     0x10
+    cmp     ax,'C'<<8|'G'
+    jnz     .CGACOM_NotPresent
+    
+    mov     ax,0xff01           ; Get display segment
+    int     0x10
+    mov     word [display],ax
 
 .CGACOM_NotPresent:
 ;-------------------------------
@@ -78,7 +78,7 @@ start:
     mov     ax,es
     cmp     ax,[display]        ; Are we done?
     jnz     .waitkey
-    add 	ax,0x200            ; Copy odd lines as well
+    add     ax,0x200            ; Copy odd lines as well
     mov     es,ax
     mov     si,picture          ; Odd lines source address
     jmp .copy_plane
@@ -104,7 +104,7 @@ start:
     int     0x21
 
 display:
-	dw 0xb800
+    dw 0xb800
 filename:
     db "rainbow.raw",0
 picture:

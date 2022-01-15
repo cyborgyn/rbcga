@@ -5,122 +5,122 @@
 ;----------------------------------------------------------------------------
 ; SetIRQ & ReloadIRQ
 ; IN:
-;	- CS:CX: new IRQ address
+;   - CS:CX: new IRQ address
 ;-------------------------------
 OldIRQ:
-	dw 0x0000,0x0000
+    dw 0x0000,0x0000
 SetIRQ:
-	push	es
-	xor		ax,ax				; Save the old IRQ vector
-	mov		es,ax
-	mov		bx,GDC_IRQ_ADDR
-	es mov	ax,word [bx]
-	mov		word [OldIRQ - PART_TSR],ax
-	es mov	ax,word [bx+2]
-	mov		word [OldIRQ - PART_TSR+2],ax
-	cli
-	
-	es mov	word [bx],cx
-	es mov	word [bx+2],cs
-	
-	sti
-	pop		es
-	ret
-	
+    push    es
+    xor     ax,ax               ; Save the old IRQ vector
+    mov     es,ax
+    mov     bx,GDC_IRQ_ADDR
+    es mov  ax,word [bx]
+    mov     word [OldIRQ - PART_TSR],ax
+    es mov  ax,word [bx+2]
+    mov     word [OldIRQ - PART_TSR+2],ax
+    cli
+    
+    es mov  word [bx],cx
+    es mov  word [bx+2],cs
+    
+    sti
+    pop     es
+    ret
+    
 ReloadIRQ:
-	push	es
-	xor		ax,ax				; Reload the old IRQ vector
-	mov		es,ax
-	mov		bx,GDC_IRQ_ADDR
-	cli
-	mov		ax,word [OldIRQ - PART_TSR]
-	es mov	word [bx],ax
-	mov		ax,word [OldIRQ - PART_TSR+2]
-	es mov	word [bx+2],ax
-	sti
-	pop		es
-	ret
-	
+    push    es
+    xor     ax,ax               ; Reload the old IRQ vector
+    mov     es,ax
+    mov     bx,GDC_IRQ_ADDR
+    cli
+    mov     ax,word [OldIRQ - PART_TSR]
+    es mov  word [bx],ax
+    mov     ax,word [OldIRQ - PART_TSR+2]
+    es mov  word [bx+2],ax
+    sti
+    pop     es
+    ret
+    
 ;----------------------------------------------------------------------------
 ; Setup screen for 640x200 black&white
 ;-------------------------------
 InitCGA640x200x2:
-	push	ax					; Save used registers
-	push	bx
-	push	cx
-	push	dx
-	push	si
-	push	di
-	push	ds
-	push	es
+    push    ax                  ; Save used registers
+    push    bx
+    push    cx
+    push    dx
+    push    si
+    push    di
+    push    ds
+    push    es
 
-	mov     ax,cs               ; Set DS point to TSR segment
-	mov     ds,ax
-	
-	; Clear the framebuffer memory
-	mov		ax,word [SETUP.DisplaySeg - PART_TSR]
-	mov		es,ax
-	xor		di,di
-	mov		cx,0x2000
-	xor		ax,ax
-	cld
-	rep stosw					; clear 16k memory
+    mov     ax,cs               ; Set DS point to TSR segment
+    mov     ds,ax
+    
+    ; Clear the framebuffer memory
+    mov     ax,word [SETUP.DisplaySeg - PART_TSR]
+    mov     es,ax
+    xor     di,di
+    mov     cx,0x2000
+    xor     ax,ax
+    cld
+    rep stosw                   ; clear 16k memory
     
     ; Temporarily set up dummy IRQ handler
-	mov		cx,(wait_irq_handler - PART_TSR)
-	call	SetIRQ
-	
-	mov		si,(screen640x200 - PART_TSR)
-	xor		cx,cx
-	xor		dx,dx
+    mov     cx,(wait_irq_handler - PART_TSR)
+    call    SetIRQ
+    
+    mov     si,(screen640x200 - PART_TSR)
+    xor     cx,cx
+    xor     dx,dx
 .cont_setup:
-	lodsb
-	cmp		al,0xff
-	jz		.wait_vrt
-	cmp     al,0xfe
-	jz      .wait_gdc_ready
-	cmp		al,0
-	jz		screen_ready
-	mov		cl,al
-	lodsb
-	mov		dl,al
+    lodsb
+    cmp     al,0xff
+    jz      .wait_vrt
+    cmp     al,0xfe
+    jz      .wait_gdc_ready
+    cmp     al,0
+    jz      screen_ready
+    mov     cl,al
+    lodsb
+    mov     dl,al
 .rep_out:
-	lodsb
-	out		dx,al
-	loop	.rep_out
-	jmp		.cont_setup
+    lodsb
+    out     dx,al
+    loop    .rep_out
+    jmp     .cont_setup
 
 .wait_gdc_ready:
-    push    cx              ;use cx as a time-out loop counter
-    in      al,0x56         ;first check if the FIFO is full
+    push    cx                  ;use cx as a time-out loop counter
+    in      al,0x56             ;first check if the FIFO is full
     test    al,2
-    jz      .gnb2            ;jump if not
-    mov     cx,0x8000        ;wait for FIFO not full or reasonable 
+    jz      .gnb2               ;jump if not
+    mov     cx,0x8000           ;wait for FIFO not full or reasonable 
 .gnb0:
-    in      al,0x56         ;time, whichever happens first
-    test    al,2            ;has a slot opened up yet?
-    jz      .gnb2            ;jump if yes
-    loop    .gnb0            ;if loop count exceeded, go on anyway
+    in      al,0x56             ;time, whichever happens first
+    test    al,2                ;has a slot opened up yet?
+    jz      .gnb2               ;jump if yes
+    loop    .gnb0               ;if loop count exceeded, go on anyway
 .gnb2:
-    mov     al,0x0d          ;issue a screen-on command to GDC
+    mov     al,0x0d             ;issue a screen-on command to GDC
     out     0x57,al
-    in      al,0x56         ;did that last command fill it?
+    in      al,0x56             ;did that last command fill it?
     test    al,2
-    jz      .gnb4            ;jump if not
+    jz      .gnb4               ;jump if not
     mov     cx,0x8000
 .gnb3:
-    in      al,0x56         ;read status register
-    test    al,2            ;test FIFO full bit
-    jnz     .gnb4            ;jump if FIFO not full
-    loop    .gnb3            ;loop until FIFO not full or give up
+    in      al,0x56             ;read status register
+    test    al,2                ;test FIFO full bit
+    jnz     .gnb4               ;jump if FIFO not full
+    loop    .gnb3               ;loop until FIFO not full or give up
 .gnb4:
-    mov     ax,0x40d         ;issue another screen-on, 
-    out     0x57,al         ;wait for FIFO empty
+    mov     ax,0x40d            ;issue another screen-on, 
+    out     0x57,al             ;wait for FIFO empty
     mov     cx,0x8000
 .gnb5:
-    in      al,0x56         ;read the GDC status
-    test    ah,al           ;FIFO empty bit set?
-    jnz     .gnb6            ;jump if not.
+    in      al,0x56             ;read the GDC status
+    test    ah,al               ;FIFO empty bit set?
+    jnz     .gnb6               ;jump if not.
     loop    .gnb5
 .gnb6:
     pop     cx
@@ -131,298 +131,298 @@ InitCGA640x200x2:
 ; Used during screen setup
 .wait_vrt:
     cli
-	xor		ax,ax
-	mov		byte [irq_handled - PART_TSR],al
+    xor     ax,ax
+    mov     byte [irq_handled - PART_TSR],al
     sti
-	mov 	cx,8000				; time-out after 8000 cycles
+    mov     cx,8000             ; time-out after 8000 cycles
 .do_wait:
-	test	byte [irq_handled - PART_TSR],0xff
-	jz		.irq_handled
-	jmp     .do_wait
+    test    byte [irq_handled - PART_TSR],0xff
+    jz      .irq_handled
+    jmp     .do_wait
 .irq_handled:
 
-	xor 	cx,cx
-	jmp		.cont_setup
+    xor     cx,cx
+    jmp     .cont_setup
 
 ;-------------------------------
 ; Screen is ready, we can set up
 ; IRQ handler
 screen_ready:
-	call	ReloadIRQ			; Restore old IRQ handler
-	mov		cx,(VRetrace640x480S - PART_TSR)
-	call	SetIRQ
-	
-	; v-- This can be moved to the declarative part --v
-	; Reset GDC Cursor Position to 0,0
-	mov		al,GDC_CMD_CURS		; Reset cusrsor to x=0,y=0
-	out		GDCP_FIFO_CMD,al
-	xor		ax,ax
-	out		GDCP_FIFO_PAR,al
-	out		GDCP_FIFO_PAR,al
-	
-	; Setup GDC for plane 0 unfiltered writes
-	mov		al,GDCIR_FBG		; Select Foreground/Background indirect register
-	out		GDCP_IND_ADDR,al
-	mov		al,0x0f				; Inverted foreground/background
-	out		GDCP_IND_DATA,al
-	
-	mov		al,GDCIR_ALUPS		; Select ALU/PS register
-	out		GDCP_IND_ADDR,al
-	mov		al,0x0e				; Write to plane 0 only, replace mode
-	out		GDCP_IND_DATA,al
-	
-	mov 	al,GDCIR_PRAM       ; Reset Write Buffer pointer
-	out		GDCP_IND_ADDR,al
-	out 	GDCP_IND_DATA,al
-	; A-- This can be moved to the declarative part --A
-	
-	cs mov	word [REGSTORE.SS - PART_TSR],ss		; #18
-	cs mov	word [REGSTORE.SP - PART_TSR],sp		; #18
-	mov		sp,cs									; #2
-	mov		ss,sp									; #2
-	mov		sp,(IrqStack.Top - PART_TSR)+4*2		; #4
-	
-	mov		ax,200				; IRQ BX -> scan line count down counter
-	push	ax
-	mov		ax,0				; IRQ DI -> even lines pointer
-	push	ax
-	mov		ax,0x2000			; IRQ SI -> odd lines pointer
-	push	ax
-	mov		ax,word [(SETUP.DisplaySeg - PART_TSR)]
-	push	ax
+    call    ReloadIRQ           ; Restore old IRQ handler
+    mov     cx,(VRetrace640x480S - PART_TSR)
+    call    SetIRQ
+    
+    ; v-- This can be moved to the declarative part --v
+    ; Reset GDC Cursor Position to 0,0
+    mov     al,GDC_CMD_CURS     ; Reset cusrsor to x=0,y=0
+    out     GDCP_FIFO_CMD,al
+    xor     ax,ax
+    out     GDCP_FIFO_PAR,al
+    out     GDCP_FIFO_PAR,al
+    
+    ; Setup GDC for plane 0 unfiltered writes
+    mov     al,GDCIR_FBG        ; Select Foreground/Background indirect register
+    out     GDCP_IND_ADDR,al
+    mov     al,0x0f             ; Inverted foreground/background
+    out     GDCP_IND_DATA,al
+    
+    mov     al,GDCIR_ALUPS      ; Select ALU/PS register
+    out     GDCP_IND_ADDR,al
+    mov     al,0x0e             ; Write to plane 0 only, replace mode
+    out     GDCP_IND_DATA,al
+    
+    mov     al,GDCIR_PRAM       ; Reset Write Buffer pointer
+    out     GDCP_IND_ADDR,al
+    out     GDCP_IND_DATA,al
+    ; A-- This can be moved to the declarative part --A
+    
+    cs mov  word [REGSTORE.SS - PART_TSR],ss        ; #18
+    cs mov  word [REGSTORE.SP - PART_TSR],sp        ; #18
+    mov     sp,cs                                   ; #2
+    mov     ss,sp                                   ; #2
+    mov     sp,(IrqStack.Top - PART_TSR)+4*2        ; #4
+    
+    mov     ax,200              ; IRQ BX -> scan line count down counter
+    push    ax
+    mov     ax,0                ; IRQ DI -> even lines pointer
+    push    ax
+    mov     ax,0x2000           ; IRQ SI -> odd lines pointer
+    push    ax
+    mov     ax,word [(SETUP.DisplaySeg - PART_TSR)]
+    push    ax
 
-	cs mov	ss,word [REGSTORE.SS - PART_TSR]		; #18
-	cs mov	sp,word [REGSTORE.SP - PART_TSR]		; #18
-	
-	mov		al,GDCIR_MODE
-	out		GDCP_IND_ADDR,al
-	mov		al, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK
-	out		GDCP_IND_DATA,al
-	
-	pop		es
-	pop		ds
-	pop		di
-	pop		si
-	pop		dx
-	pop		cx
-	pop		bx
-	pop		ax					; Restore saved registers
-	ret
+    cs mov  ss,word [REGSTORE.SS - PART_TSR]        ; #18
+    cs mov  sp,word [REGSTORE.SP - PART_TSR]        ; #18
+    
+    mov     al,GDCIR_MODE
+    out     GDCP_IND_ADDR,al
+    mov     al, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK
+    out     GDCP_IND_DATA,al
+    
+    pop     es
+    pop     ds
+    pop     di
+    pop     si
+    pop     dx
+    pop     cx
+    pop     bx
+    pop     ax                  ; Restore saved registers
+    ret
 
 ;----------------------------------------------------------------------------
 wait_irq_handler:
-	cs mov	byte [irq_handled - PART_TSR],0xff
-	iret
+    cs mov  byte [irq_handled - PART_TSR],0xff
+    iret
 irq_handled:
-	db 0
+    db 0
 
 ;----------------------------------------------------------------------------
 ; Setup screen for onboard text video out
 ;-------------------------------
 InitChar80:
-	push	ax					; Save used registers
-	push	bx
-	push	es
+    push    ax                  ; Save used registers
+    push    bx
+    push    es
     
     ; TODO: this could occasionally not work: Need to sync up with the IRQ handler
     
-	; Turning off vertical retrace IRQ, blanking graphics screen
-	mov		al,GDCIR_MODE
-	out		GDCP_IND_ADDR,al
-	mov		al, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_BLANK
-	out		GDCP_IND_DATA,al
-	
-	call 	ReloadIRQ
-	
-	mov		al,GDC_CMD_BLANK
-	out		GDCP_FIFO_CMD,al
-	mov		al,0x83
-	out		0x0a,al
-	
-	pop		es
-	pop		bx
-	pop 	ax					; Restore saved registers
-	ret
+    ; Turning off vertical retrace IRQ, blanking graphics screen
+    mov     al,GDCIR_MODE
+    out     GDCP_IND_ADDR,al
+    mov     al, GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_BLANK
+    out     GDCP_IND_DATA,al
+    
+    call    ReloadIRQ
+    
+    mov     al,GDC_CMD_BLANK
+    out     GDCP_FIFO_CMD,al
+    mov     al,0x83
+    out     0x0a,al
+    
+    pop     es
+    pop     bx
+    pop     ax                  ; Restore saved registers
+    ret
 
 ;----------------------------------------------------------------------------
 ; Vertical Retrace IRQ handler:
-; Copy 3 scan lines at a time to GDC
+; Copy 4 scan lines at a time to GDC
 ;----------------------------------------------------------------------------
 VRetrace640x480S:
     cli
-	cs mov	word [REGSTORE.SS - PART_TSR],ss		; #18
-	cs mov	word [REGSTORE.SP - PART_TSR],sp		; #18
-	mov		sp,cs									; #2
-	mov		ss,sp									; #2
-	mov		sp,(IrqStack.Regs - PART_TSR)			; #4
-	push	ax										; #15 * 7
-	push	bx
-	push	cx
-	push	dx
-	push 	si
-	push	di
-	push	ds										; #14 * 2
-	push	es
-	push    bp
-	
-	mov 	ax,sp									; #2
-	mov		sp,(IrqStack.Top - PART_TSR)			; #4
-	
-	; Restore IRQ state
-	pop		ds		; CGA frame buffer segment      ; #12 * 4
-	pop		si		; Odd scan line pointer
-	pop		di		; Even scan line pointer
-	pop		bp		; Line count down counter
-	
-	push	ax		; save register file SP			; #15
-													; Total = #240
-	
-	; Turn off DGC interrupts   ; Total = # 34
-	mov		ax,GDCIR_MODE + (GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_NOBLANK) * 0x100
-	out		GDCP_IND_ADDR,al
-	mov		al,ah
-	out		GDCP_IND_DATA,al
-	
-	; Save registers
-	;mov		word [REGSTORE.AX - PART_TSR],ax		; #18 * 8 cycles = 144
-	;mov		word [REGSTORE.BX - PART_TSR],bx
-	;mov		word [REGSTORE.CX - PART_TSR],cx
-	;mov		word [REGSTORE.DX - PART_TSR],dx
-	;mov		word [REGSTORE.SI - PART_TSR],si
-	;mov		word [REGSTORE.DI - PART_TSR],di
-	;mov		word [REGSTORE.DS - PART_TSR],ds
-	;mov		word [REGSTORE.ES - PART_TSR],es		; restore: 17*8 = 136
-	; Register Backup-restore total = 280
-	
-	; need to track cx,si,di -> 3*(18+17) = 105
-	; push-pop: 3*(15+12) = 81
-	
-	; Initialize a few registers
-	mov 	bx,GDCP_PRAM+(GDCP_FIFO_PAR<<8)		; We will use it in the loop as out port
-	xor     dh,dh
+    cs mov  word [REGSTORE.SS - PART_TSR],ss        ; #18
+    cs mov  word [REGSTORE.SP - PART_TSR],sp        ; #18
+    mov     sp,cs                                   ; #2
+    mov     ss,sp                                   ; #2
+    mov     sp,(IrqStack.Regs - PART_TSR)           ; #4
+    push    ax                                      ; #15 * 7
+    push    bx
+    push    cx
+    push    dx
+    push    si
+    push    di
+    push    ds                                      ; #14 * 2
+    push    es
+    push    bp
+    
+    mov     ax,sp                                   ; #2
+    mov     sp,(IrqStack.Top - PART_TSR)            ; #4
+    
+    ; Restore IRQ state
+    pop     ds      ; CGA frame buffer segment      ; #12 * 4
+    pop     si      ; Odd scan line pointer
+    pop     di      ; Even scan line pointer
+    pop     bp      ; Line count down counter
+    
+    push    ax      ; save register file SP         ; #15
+                                                    ; Total = #240
+    
+    ; Turn off DGC interrupts   ; Total = # 34
+    mov     ax,GDCIR_MODE + (GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_NOINT | GDCM_NOBLANK) * 0x100
+    out     GDCP_IND_ADDR,al
+    mov     al,ah
+    out     GDCP_IND_DATA,al
+    
+    ; Save registers
+    ;mov        word [REGSTORE.AX - PART_TSR],ax        ; #18 * 8 cycles = 144
+    ;mov        word [REGSTORE.BX - PART_TSR],bx
+    ;mov        word [REGSTORE.CX - PART_TSR],cx
+    ;mov        word [REGSTORE.DX - PART_TSR],dx
+    ;mov        word [REGSTORE.SI - PART_TSR],si
+    ;mov        word [REGSTORE.DI - PART_TSR],di
+    ;mov        word [REGSTORE.DS - PART_TSR],ds
+    ;mov        word [REGSTORE.ES - PART_TSR],es        ; restore: 17*8 = 136
+    ; Register Backup-restore total = 280
+    
+    ; need to track cx,si,di -> 3*(18+17) = 105
+    ; push-pop: 3*(15+12) = 81
+    
+    ; Initialize a few registers
+    mov     bx,GDCP_PRAM+(GDCP_FIFO_PAR<<8)     ; We will use it in the loop as out port
+    xor     dh,dh
     mov     dl,bh               ; # 2 | DX = GDCP_FIFO_PAR
-	                            ; BL = Write Buffer port, BH = FIFO port
-	mov		cx,4				; In 1 VRetrace we display 2 can lines
-	cld
-	
-	; At least 286 cycles up to this point, only initialization
-	
-	; First copy even lines, from BA00:0000
-	; All 8000 bytes are packed next to each other
-	; starting from DS:SI
+                                ; BL = Write Buffer port, BH = FIFO port
+    mov     cx,4                ; In 1 VRetrace we display 2 can lines
+    cld
+    
+    ; At least 286 cycles up to this point, only initialization
+    
+    ; First copy even lines, from BA00:0000
+    ; All 8000 bytes are packed next to each other
+    ; starting from DS:SI
 
 .nextLine:
-	push	cx
-	
-	; We gained 50+ cycles by eliminating cursor positioning in GDC
-	xchg	si,di				; # 4 | Continue with the odd/even other lines
-	; each line is 80 (5x16) bytes long
-	mov		cl,5
+    push    cx
+    
+    ; We gained 50+ cycles by eliminating cursor positioning in GDC
+    xchg    si,di               ; # 4 | Continue with the odd/even other lines
+    ; each line is 80 (5x16) bytes long
+    mov     cl,5
 .nextBytesInLine:
-	; Prepare the GDC to write from Write Buffer
-	mov		ax,0x0200+GDC_CMD_FIGS	; # 4 |
-	out		GDCP_FIFO_CMD,al    ; #14 |
-	mov		al,ah				; # 2 | Direction 2, WDAT will come
-	out		dx,al               ; #12 | Here the DX should be GDCP_FIFO_PAR
-	mov		ax,7				; # 4 | 8 words waiting in Write Buffer
-	out		dx,al               ; #12 |
-	mov		al,ah               ; # 2 |
-	out		dx,al               ; #12 |
-	
-	mov     dl,bl               ; # 2 | DX = GDCP_PRAM
-	                            ; Total= #62
-	
-	lodsw                       ; Write 16 bytes to Write Buffer
-	out		dx,al               ; #21 / byte = 336 Cycles
-	mov		al,ah
-	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	lodsw
-	out		dx,al
-	mov		al,ah
-	out		dx,al
-	
-	mov		ax,GDC_CMD_WDAT | D_REPLACE | D_WORD +0xff00	; # 4 |
-	out		GDCP_FIFO_CMD,al	; #14 | Start the write
-	mov     dl,bh               ; # 2 | DX = GDCP_FIFO_PAR
-	mov		al,ah				; # 2 | Set write mask, only LSB is used anyways...
-	out		dx,al               ; #12 |
-	out		dx,al               ; #12 |
-	                            ; =46 cycles
-	loop	.nextBytesInLine    ; #17 |
-	                            ; =461 cycles / 16 bytes (overhead = 125) -> 2305 cycles / line
-	pop		cx
-	dec 	bp					; If all 200 scan lines finished,
-	jz		.restart			; We need to restart
-	loop	.nextLine           ; #17 |
-	
+    ; Prepare the GDC to write from Write Buffer
+    mov     ax,0x0200+GDC_CMD_FIGS  ; # 4 |
+    out     GDCP_FIFO_CMD,al    ; #14 |
+    mov     al,ah               ; # 2 | Direction 2, WDAT will come
+    out     dx,al               ; #12 | Here the DX should be GDCP_FIFO_PAR
+    mov     ax,7                ; # 4 | 8 words waiting in Write Buffer
+    out     dx,al               ; #12 |
+    mov     al,ah               ; # 2 |
+    out     dx,al               ; #12 |
+    
+    mov     dl,bl               ; # 2 | DX = GDCP_PRAM
+                                ; Total= #62
+    
+    lodsw                       ; Write 16 bytes to Write Buffer
+    out     dx,al               ; #21 / byte = 336 Cycles
+    mov     al,ah
+    out     dx,al
+    lodsw
+    out     dx,al
+    mov     al,ah
+    out     dx,al
+    lodsw
+    out     dx,al
+    mov     al,ah
+    out     dx,al
+    lodsw
+    out     dx,al
+    mov     al,ah
+    out     dx,al
+    lodsw
+    out     dx,al
+    mov     al,ah
+    out     dx,al
+    lodsw
+    out     dx,al
+    mov     al,ah
+    out     dx,al
+    lodsw
+    out     dx,al
+    mov     al,ah
+    out     dx,al
+    lodsw
+    out     dx,al
+    mov     al,ah
+    out     dx,al
+    
+    mov     ax,GDC_CMD_WDAT | D_REPLACE | D_WORD +0xff00    ; # 4 |
+    out     GDCP_FIFO_CMD,al    ; #14 | Start the write
+    mov     dl,bh               ; # 2 | DX = GDCP_FIFO_PAR
+    mov     al,ah               ; # 2 | Set write mask, only LSB is used anyways...
+    out     dx,al               ; #12 |
+    out     dx,al               ; #12 |
+                                ; =46 cycles
+    loop    .nextBytesInLine    ; #17 |
+                                ; =461 cycles / 16 bytes (overhead = 125) -> 2305 cycles / line
+    pop     cx
+    dec     bp                  ; If all 200 scan lines finished,
+    jz      .restart            ; We need to restart
+    loop    .nextLine           ; #17 |
+    
 .irq_finished:
-	; Turn on DGC interrupts again
-	mov		ax,GDCIR_MODE + (GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK) * 0x100
-	out		GDCP_IND_ADDR,al
-	mov		al,ah
-	out		GDCP_IND_DATA,al
+    ; Turn on DGC interrupts again
+    mov     ax,GDCIR_MODE + (GDCM_RES_HI | GDCM_WORD | GDCM_WRITE | GDCM_NOSCROLL | GDCM_INT | GDCM_NOBLANK) * 0x100
+    out     GDCP_IND_ADDR,al
+    mov     al,ah
+    out     GDCP_IND_DATA,al
 
-	pop 	ax		; Stack pointer where the registers are		; #12
-	
-	; Save internal state
-	push	bp		; Line count down counter	| #12 * 4
-	push	di		; Even scan line pointer
-	push	si		; Odd scan line pointer
-	push	ds		; CGA framebuffer segment
-	
-	mov 	sp,ax	; Restore registers from different position ; #2
-	
-	pop     bp
-	pop		es									; #12 * 8
-	pop		ds
-	pop		di
-	pop		si
-	pop		dx
-	pop		cx
-	pop		bx
-	pop		ax
-	cs mov	ss,word [REGSTORE.SS - PART_TSR]	; #17 | Original application stack segment & pointer
-	cs mov	sp,word [REGSTORE.SP - PART_TSR]	; #17
-												; Total = #144
-	sti
-	iret
+    pop     ax      ; Stack pointer where the registers are     ; #12
+    
+    ; Save internal state
+    push    bp      ; Line count down counter   | #12 * 4
+    push    di      ; Even scan line pointer
+    push    si      ; Odd scan line pointer
+    push    ds      ; CGA framebuffer segment
+    
+    mov     sp,ax   ; Restore registers from different position ; #2
+    
+    pop     bp
+    pop     es                                  ; #12 * 8
+    pop     ds
+    pop     di
+    pop     si
+    pop     dx
+    pop     cx
+    pop     bx
+    pop     ax
+    cs mov  ss,word [REGSTORE.SS - PART_TSR]    ; #17 | Original application stack segment & pointer
+    cs mov  sp,word [REGSTORE.SP - PART_TSR]    ; #17
+                                                ; Total = #144
+    sti
+    iret
 
 .restart:
-	mov		al,GDC_CMD_CURS		; Reset cusrsor to x=0,y=0
-	out		GDCP_FIFO_CMD,al
-	xor		ax,ax
-	out		GDCP_FIFO_PAR,al
-	out		GDCP_FIFO_PAR,al
-	
-	mov		si,0x2000			; Reset pointers + counter
-	mov		di,0
-	mov		bp,200
-	
-	jmp 	.irq_finished
+    mov     al,GDC_CMD_CURS     ; Reset cusrsor to x=0,y=0
+    out     GDCP_FIFO_CMD,al
+    xor     ax,ax
+    out     GDCP_FIFO_PAR,al
+    out     GDCP_FIFO_PAR,al
+    
+    mov     si,0x2000           ; Reset pointers + counter
+    mov     di,0
+    mov     bp,200
+    
+    jmp     .irq_finished
 
 screen640x200:
         db 1, GDCP_FIFO_CMD, GDC_CMD_RESET
