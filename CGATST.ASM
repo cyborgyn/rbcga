@@ -88,7 +88,8 @@ PictureReady:
 ;-------------------------------
     ; x = (80-12)/2=34, y=200-8, l=12
     ; BIOS Char Map is at FFA6:000E, 8 bytes a char
-    mov     di,(200-8)*80+34
+    mov     es,[display]
+    mov     di,(100-4)*80+34    ; Interlaced!!
     mov     ax,0xffa6
     mov     ds,ax
     mov     bx,filename
@@ -106,11 +107,11 @@ PictureReady:
     mov     cx,4
 .copy_char:
     movsb                       ; Even line
-    add     di,0x200-1
+    add     di,0x2000-1
     movsb                       ; Odd line
-    sub     di,0x200-1-80       ; Next even line
+    sub     di,0x2000+1-80      ; Next even line
     loop    .copy_char
-    sub     di,8*80-1           ; Next even line to the right
+    sub     di,4*80-1           ; Next even line to the right
     inc     bx
     jmp     .next_char
     

@@ -93,6 +93,8 @@ SETUP:
 
 %include "GDC.INC"
 %include "CGA640S.INC"
+CGAfont:
+%include "CGAFONT.INC"
 
 REGSTORE:   ; SS,SP temp storage during IRQ
 .SS:    dw      0
@@ -133,7 +135,11 @@ PART_INSTALLER:
     mov     dx,INT10 - PART_TSR     ; Note: DS=TSR segment!
     mov     ax,0x2510
     int     0x21                    ; DOS Set interrupt
-
+    
+    mov     dx,CGAfont - PART_TSR
+    mov     ax,0x251f
+    int     0x21
+    
     ; Calculate size of TSR memory needed,
     ; and exit remaining resident
     mov     dx,Strings.M_Activated
