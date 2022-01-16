@@ -55,31 +55,6 @@ start:
     mov     es,ax
     mov     si,picture          ; Odd lines source address
     jmp     .copy_plane
-.copy_ready:
-
-;-------------------------------
-; Setup screen
-;-------------------------------
-    cld
-    mov     si,screen
-    xor     cx,cx
-    xor     dx,dx
-.cont_setup:
-    lodsb
-    cmp     al,0xff
-    jz      .wait_vrt
-    cmp     al,0xfe
-    jz      .wait_gdc
-    cmp     al,0
-    jz      screen_ready
-    mov     cl,al
-    lodsb
-    mov     dl,al
-.rep_out:
-    lodsb
-    out     dx,al
-    loop    .rep_out
-    jmp     .cont_setup
 
 .wait_gdc:
     push    cx              	;use cx as a time-out loop counter
@@ -116,6 +91,32 @@ start:
 .gnb6:
     pop     cx
     jmp     .cont_setup
+
+;-------------------------------
+; Setup screen
+;-------------------------------
+.copy_ready:
+    cld
+    mov     si,screen
+    xor     cx,cx
+    xor     dx,dx
+.cont_setup:
+    lodsb
+    cmp     al,0xff
+    jz      .wait_vrt
+    cmp     al,0xfe
+    jz      .wait_gdc
+    cmp     al,0
+    jz      screen_ready
+    mov     cl,al
+    lodsb
+    mov     dl,al
+.rep_out:
+    lodsb
+    out     dx,al
+    loop    .rep_out
+    jmp     .cont_setup
+
 ;-------------------------------
 ; Wait for vertical retrace
 ; Used during screen setup

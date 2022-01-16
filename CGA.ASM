@@ -81,18 +81,18 @@ INT10:          ; Entry point for Int10
 
 Init640x200:
     call    InitCGA640x200x2        ; Defined in CGA640S.INC
-    cs cmp  byte [SETUP.AutoPatcher - TSR_PART],0
+    cs cmp  byte [SETUP.AutoPatcher - PART_TSR],0
     jz      .NoAutoPatcher
     call    InitAutoPatcher         ; If AutoPatcher loaded, initialize it
-.NoAutoPatcher                      ; Defined in AUTOPTCH.INC
+.NoAutoPatcher:                     ; Defined in AUTOPTCH.INC
     iret
 
 InitChar80:
-    call    InitChar80              ; Defined in CGA640S.INC
-    cs cmp  byte [SETUP.AutoPatcher - TSR_PART],0
+    call    InitCGAChar80x25         ; Defined in CGA640S.INC
+    cs cmp  byte [SETUP.AutoPatcher - PART_TSR],0
     jz      .NoAutoPatcher
     call    DestroyAutoPatcher      ; If AutoPatcher loaded, deinitialize it
-.NoAutoPatcher                      ; Defined in AUTOPTCH.INC
+.NoAutoPatcher:                     ; Defined in AUTOPTCH.INC
     iret
 
 SETUP:

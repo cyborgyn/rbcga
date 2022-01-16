@@ -219,7 +219,7 @@ irq_handled:
 ;----------------------------------------------------------------------------
 ; Setup screen for onboard text video out
 ;-------------------------------
-InitChar80:
+InitCGAChar80x25:
     push    ax                  ; Save used registers
     push    bx
     push    es
