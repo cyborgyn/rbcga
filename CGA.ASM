@@ -16,7 +16,7 @@
 ; - Periodic framebuffer synchronization
 ; - Switching back to built-in char screen
 ;-----------------------------------------------------------
-VERSION:            equ 0x0001
+VERSION:            equ 0x0002
     use16
     cpu     8086
     org     0x100
