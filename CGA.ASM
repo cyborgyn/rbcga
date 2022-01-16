@@ -51,11 +51,11 @@ INT10:          ; Entry point for Int10
 
 .F_mode_switch:
     cmp     al,0x06                 ; 640x200 B/W graphics (CGA,EGA,MCGA,VGA)
-    jz      .Init640x200
+    jz      Init640x200
     cmp     al,02                   ; 80x25 16 shades of gray text (CGA,EGA,MCGA,VGA)
-    jz      .InitChar80
+    jz      InitChar80
     cmp     al,03                   ; 80x25 16 color text (CGA,EGA,MCGA,VGA)
-    jz      .InitChar80
+    jz      InitChar80
     stc
     iret
 
@@ -79,22 +79,30 @@ INT10:          ; Entry point for Int10
     mov     ax,.Magic
     iret
 
-.Init640x200:
-    call    InitCGA640x200x2        ; Defined in CGA640S.asm
+Init640x200:
+    call    InitCGA640x200x2        ; Defined in CGA640S.INC
+    cs cmp  byte [SETUP.AutoPatcher - TSR_PART],0
+    jz      .NoAutoPatcher
+    call    InitAutoPatcher         ; If AutoPatcher loaded, initialize it
+.NoAutoPatcher                      ; Defined in AUTOPTCH.INC
     iret
 
-.InitChar80:
-    call    InitChar80              ; Defined in CGA640S.asm
+InitChar80:
+    call    InitChar80              ; Defined in CGA640S.INC
+    cs cmp  byte [SETUP.AutoPatcher - TSR_PART],0
+    jz      .NoAutoPatcher
+    call    DestroyAutoPatcher      ; If AutoPatcher loaded, deinitialize it
+.NoAutoPatcher                      ; Defined in AUTOPTCH.INC
     iret
 
 SETUP:
 .DisplaySeg:
     dw      0xb800                  ; This defaults to B800
+.AutoPatcher:
+    db      0                       ; If 0 AutoPatcher in inacive
 
 %include "GDC.INC"
 %include "CGA640S.INC"
-CGAfont:
-%include "CGAFONT.INC"
 
 REGSTORE:   ; SS,SP temp storage during IRQ
 .SS:    dw      0
@@ -104,6 +112,11 @@ IrqStack:
     times 0x80 db 0
 .Regs:  equ $
 .Top:   equ $ - 0x20
+
+PART_AUTOPATCHER:
+CGAfont:
+%include "AUTOPTCH.INC"
+%include "CGAFONT.INC"
 
 ;-----------------------------------------------------------
 ; This is the TSR installer code
@@ -327,7 +340,17 @@ Main:
 
     cmp     cx,1            ; If Strings.IsNullOrEmpty(parameters)
     jbe     TryInstall
-
+    
+    mov     si,Strings.Param3
+    call    FindParam
+    jnc     .NoAutoPatcher
+    
+    mov     byte [SETUP.AutoPatcher],1
+    mov     dx,Strings.M_AutoPatcher
+    call    Print
+    jmp     TryInstall
+    
+.NoAutoPatcher:    
     mov     si,Strings.Param2
     call    FindParam       ; Find "TEST" cmd line param
     jc      TryInstallTest
@@ -391,6 +414,7 @@ Strings:
     db "  Usage: CGA.COM [command]",10,13
     db "  without parameters.....: Activate CGA.COM emulator",10,13
     db "  Possible commands:",10,13
+    db "  PATCH..................: Enable BIOS CharMap AutoPatcher",10,13
     db "  TEST...................: Activate in test mode",10,13
     db "  OFF....................: Deactivate",10,13,10,13
     db "For additional info, visit https://github.com/cyborgyn/rbcga",10,13
@@ -400,7 +424,11 @@ Strings:
 .Param2:
     db (.Param3-$-1)," TEST "
 .Param3:
+    db (.Param4-$-1)," PATCH "
+.Param4:
 
+.M_AutoPatcher:
+    db "  AutoPatcher enabled.",10,13,'$'
 .M_TestMode:
     db "  CGA.COM in test mode is not accessible to ordinary applications.",10,13,'$'
 .M_Deactivated:
