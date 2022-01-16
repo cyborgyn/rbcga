@@ -77,11 +77,43 @@ start:
     
     mov     ax,es
     cmp     ax,[display]        ; Are we done?
-    jnz     .waitkey
+    jnz     PictureReady
     add     ax,0x200            ; Copy odd lines as well
     mov     es,ax
     mov     si,picture          ; Odd lines source address
     jmp .copy_plane
+PictureReady:
+;-------------------------------
+; Write filename at the bottom
+;-------------------------------
+    ; x = (80-12)/2=34, y=200-8, l=12
+    ; BIOS Char Map is at FFA6:000E, 8 bytes a char
+    mov     di,(200-8)*80+34
+    mov     ax,0xffa6
+    mov     ds,ax
+    mov     bx,filename
+
+.next_char:
+    xor     ax,ax
+    cs mov  al,byte [bx]
+    or      al,al
+    jz      .waitkey
+    shl     ax,1                ; AX=AX*8
+    shl     ax,1
+    shl     ax,1
+    add     ax,0x0e
+    mov     si,ax
+    mov     cx,4
+.copy_char:
+    movsb                       ; Even line
+    add     di,0x200-1
+    movsb                       ; Odd line
+    sub     di,0x200-1-80       ; Next even line
+    loop    .copy_char
+    sub     di,8*80-1           ; Next even line to the right
+    inc     bx
+    jmp     .next_char
+    
 ;-------------------------------
 ; Wait for key stroke
 ;-------------------------------
