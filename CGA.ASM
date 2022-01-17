@@ -107,16 +107,18 @@ SETUP:
 REGSTORE:   ; SS,SP temp storage during IRQ
 .SS:    dw      0
 .SP:    dw      0
+.DS:    dw      0
+.ES:    dw      0
 
 IrqStack:
     times 0x80 db 0
 .Regs:  equ $
 .Top:   equ $ - 0x20
 
-PART_AUTOPATCHER:
 CGAfont:
-%include "AUTOPTCH.INC"
 %include "CGAFONT.INC"
+PART_AUTOPATCHER:
+%include "AUTOPTCH.INC"
 
 ;-----------------------------------------------------------
 ; This is the TSR installer code
