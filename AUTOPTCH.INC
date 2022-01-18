@@ -6,7 +6,7 @@
 ; InitAutoPatcher
 ; Initializes auto paching mechanism, by
 ; - Hooks to int3 interrupt
-; - Beuilds up breakpoint table
+; - Builds up breakpoint table
 ; - Finds MOV {DS,ES},r/m instructions in CS segment
 ; - Replaces MOVs with INT3 + n*NOP
 ; IN:
@@ -28,16 +28,51 @@ InitAutoPatcher:
     mov     es,word [bp+(2+2)]  ; INT 10h caller's CS on stack
     ; Find E8 instructions on callers CS segment
     ; TODO: check less, if loaded program is smaller
-    mov     cx,0xfffc           ; Check whole segment - 4 (not to roll around the segment edge)
-    xor     di,di               ; Starting from the beginning
+    mov     cx,0xfffb           ; Check whole segment - 5 (not to roll around the segment edge)
+    xor     di,di               ; Starting from the beginning + 1
+    inc     di
     cld
 .find_next_MOV:
     mov     al,0x8e             ; MOV sreg,xxx first byte
     repne scasb                 ; ~1M cycles = 0.2s for 64k
-    je      .MOV_found
+    jcxz    .instrumented
+    
+    ; sreg3: ES=000, DS=011
+    ; reg  : 000-111=AX,CX,DX,BX,SP,BP,SI,DI
+    ; mod  : 00=disp0, 01=disp8, 10=disp16, 11=reg
+    ; 10001110 : 11 sreg3 reg -> 1 bytes
+    ; 10001110 : mod sreg3 r/m
+    es mov  al,byte [di]        ; Load Mod/sreg/rm byte
+    mov     ah,al               ; Save for later use
+    and     al,0b_00_111_000
+    jz      MovConfirmed.ds_or_es   ; it's a MOV ES,something since ES=000
+    cmp     al,0b_00_011_000
+    jz      MovConfirmed        ; it's a MOV DS,something
+    inc     di                  ; We don't have to recheck Mod/r/m byte
+    dec     cx
+    jmp     .find_next_MOV      ; If it's not dealing with DS or ES
+                                ; we leave it alone
+MovConfirmed:
+    mov     al,0x80             ; InstStore.Status flag: DS
+                                ; If it was ES, AL already = 00
+.ds_or_es:                      ; It is MOV ES,xxx or MOV DS,xxx
+    push    cx
+    dec     di                  ; ES:DI points to instruction
+    
+    ; Let's calculate instruction length with prefix included
+    call    GetInstructionLength
+    ; CX = instruction length
+    or      al,cl               ; Set length (bit 0-2) in status byte
+    ; Create a breakpoint at ES:DI
+    call    CreateBreakPoint
+    
+    pop     cx
+    or      cx,cx
+    jnz     .find_next_MOV
 
 .instrumented:
-    ; TODO: also implement POP DS,ES search and instrumentation
+    ; TODO: also implement POP DS,ES search and instrumentation (1F & 07)
+    ; TODO: also implement LES reg and LDS reg search and instrumentation (C4 & C5)
     pop     es
     pop     ds
     pop     di
@@ -46,34 +81,126 @@ InitAutoPatcher:
     pop     bp
     ret
 
-.MOV_found:
-    ; sreg3: ES=000, DS=011
-    ; reg  : 000-111=AX,CX,DX,BX,SP,BP,SI,DI
-    ; mod  : 00=disp0, 01=disp8, 10=disp16, 11=reg
-    ; 10001110 : 11 sreg3 reg -> 1 bytes
-    ; 10001110 : mod sreg3 r/m
-    es mov  al,byte [di]        ; Load Mod/sreg/rm byte
-    and     al,0b_00_111_000
-    jz      .ds_or_es           ; since ES=000
-    cmp     al,0b_00_011_000
-    jz      .ds_or_es
-    inc     di                  ; We don't have to recheck Mod/r/m byte
-    dec     cx
-    jmp     .find_next_MOV      ; If it's not dealing with DS or ES
-                                ; we leave it alone
-.ds_or_es:                      ; It is MOV ES,xxx or MOV DS,xxx
-    ; TODO: check if it has Segment register prefix
-    dec     di                  ; ES:DI points to instruction
-    ; TODO: check if it has SS Segment reference (default, or prefixed) and cancel instrumentation
-    
-    ; TODO: do instrumentation
-    or      cx,cx
-    jnz     .find_next_MOV
-    jmp     .instrumented
 
+;----------------------------------------------------------------------------
+; DestroyAutoPatcher
+;-------------------------------
 DestroyAutoPatcher:
     ; TODO: Remove left over application instrumentation
     ; TODO: Free reserved memory
+    ret
+
+;----------------------------------------------------------------------------
+; Create a new break point for ES:DI
+; IN:
+;   - AL: InstStore.Status
+;   - ES:DI: break point place
+;   - CX: instruction length
+; OUT:
+;   - ES:DI= next instruction after breakpoint
+;   - CX= 0
+;   - AL= 90h
+;-------------------------------
+CreateBreakPoint:
+    push    bx
+    push    dx
+    push    si
+    push    di
+    push    es
+    push    ds
+    push    cx
+    
+    mov     si,di               ; Move ES:DI into DS:SI
+    mov     bx,es
+    mov     ds,bx
+    mov     dx,si               ; Save SI for later use
+    ; We load the TOP pointer of InstStore
+    cs les  di,dword [InstStoreAddress - PART_TSR]
+    inc     di
+    inc     di                  ; Skip address for now
+    stosb                       ; Write Status
+    mov     ax,0x9090           ; Prefill area with NOPs
+    stosw                       ; 5xNOP
+    stosw
+    stosb
+    
+    ; We take the opportunity, that DI points right after the last
+    ; InstStore value, so we save it back for next time
+    cs mov  word [InstStoreAddress - PART_TSR + 2],di
+    
+    ; Calculate physical address of CS:IP
+    mov     ax,dx               ; AX=IP
+    mov     bx,ds               ; BX=CS
+    mov     cl,12
+    shr     bx,cl               ; BX=CS upper 4 bits
+    mov     cx,ds
+    add     ax,cx               ; AX=Phisical Address lower 16 bits
+    adc     bx,0                ; BX=Phisical Address upper 4 bits
+    shl     bl,1                ; BX=InstStoreTable index
+    
+    ; Update InstStoreTable[bx + 1] to new end value
+    cs mov  word [InstStoreTable - PART_TSR + bx + 2],di
+    
+    sub     di,8                ; DI points to the InstStore.Address
+    
+    cs cmp  word [InstStoreTable - PART_TSR + bx],0
+    jnz     .entryStarted
+    cs mov  word [InstStoreTable - PART_TSR + bx],di
+.entryStarted:
+    stosw                       ; Write the phisical address to InstStore.Address
+    inc     di                  ; Skip the status byte in InstStore
+    
+    pop     cx
+    push    cx
+    rep movsb                   ; Copy instruction
+    
+    pop     cx
+    pop     ds
+    pop     es
+    pop     di
+    pop     si
+    pop     dx
+    pop     bx
+    ; Now place INT 3 + NOPs
+    mov     al,0xcc             ; INT 3 instruction
+    stosb
+    mov     al,0x90             ; NOP instruction
+    dec     cx                  ; CX = instruction length - 1
+    rep stosb
+    ret
+
+;----------------------------------------------------------------------------
+; Calculates instruction length according to mod/rm byte
+; If there is segment prefix, it counts as well, and decrements DI
+; IN:
+;   - AH: mod/rm byte
+;   - ES:DI: points to instruction
+; OUT:
+;   - CX= length of instruction
+;   - ES:DI= pointer to instruction with prefix (if exisits)
+;-------------------------------
+GetInstructionLength:
+    mov     cx,2                ; Since we surely have instruction + mod/rm byte
+    and     ah,0b_11_000_111    ; Mask out reg part
+    cmp     ah,0b_00_000_110    ; Special case: no index, just disp16
+    jz      .IncLen2
+    and     ah,0b_11_000_000    ; Mask out r/m part also
+    jz      .ModRmSizeReady     ; Mod 00 -> just index, no more bytes (special case already handled)
+    cmp     ah,0b_10_000_000
+    ja      .ModRmSizeReady     ; Mod 11 -> just registers, no more bytes
+    jb      .IncLen             ; Mod 01 -> disp8, 1 more bytes
+.IncLen2:
+    inc     cx                  ; Mod 10 -> disp16, 2 more bytes
+.IncLen:
+    inc     cx
+.ModRmSizeReady:
+    es mov  ah,byte [di-1]      ; Check previous byte
+    and     ah,0b_11100111
+    cmp     ah,0x26             ; Is it a segment prefix?
+    jnz     .haveNoSegPrefix
+    dec     di                  ; We have prefix, ES:DI points to prefix
+    inc     cx                  ; Instruction length +1
+.haveNoSegPrefix:
     ret
 
 ;----------------------------------------------------------------------------
@@ -92,8 +219,8 @@ EvalSegment:
     mov     bx,0xffa6 - ((CGAfont - PART_TSR) / 0x10)
     sub     bx,ax
     mov     ax,cs
-    sub     ax,bx               ; AX = CS - (FFA6 - CGAfont.seg - AX)
-    pop     bx
+    sub     ax,bx               ; AX = CS - (FFA6 - AX - CGAfont.seg)
+    pop     bx                  ; Needs: CS > 1000 !!!!
     ret
 .needNoCorrection:
     ; TODO: check if it's pointing into the InstStore
@@ -247,7 +374,9 @@ CSoverridden:
 ;                        IST[0..4]     IS[?].Address   | Free slot cnt
 InstStoreTable:
     times 17 dw 0
-
+InstStoreAddress:
+    dw      0,0
+    
     times 16-(($-PART_TSR) % 16) db 0xff   ; Padding to align InstStore to segment start
 ;----------------------------------------------------------------------------
 ; InstStore contains an ordered list of 8 bytes per breakpoint
