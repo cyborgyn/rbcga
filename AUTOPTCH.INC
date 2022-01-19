@@ -5,7 +5,6 @@
 ;----------------------------------------------------------------------------
 ; InitAutoPatcher
 ; Initializes auto paching mechanism, by
-; - Hooks to int3 interrupt
 ; - Builds up breakpoint table
 ; - Finds MOV {DS,ES},r/m instructions in CS segment
 ; - Replaces MOVs with INT3 + n*NOP
@@ -22,7 +21,6 @@ InitAutoPatcher:
     push    ds
     push    es
     
-    ; TODO: Register INT3 interrupt handler, if it wasn't yet
     ; TODO: Reserve memory area to work with, if needed
     
     mov     es,word [bp+(2+2)]  ; INT 10h caller's CS on stack

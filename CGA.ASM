@@ -95,6 +95,8 @@ InitChar80:
 .NoAutoPatcher:                     ; Defined in AUTOPTCH.INC
     iret
 
+INT_3_original:
+    dw      0,0
 SETUP:
 .DisplaySeg:
     dw      0xb800                  ; This defaults to B800
@@ -140,21 +142,33 @@ PART_INSTALLER:
     add     ax,0x08
     mov     ds,ax
 
-    ; Get old interrupt vector
+    ; Get old INT 10h vector
     mov     ax,0x3510
     int     0x21
     mov     [INT10.original - PART_TSR],bx
     mov     [INT10.original - PART_TSR+2],es
 
-    ; Set new interrupt vector
+    ; Set new INT 10h vector
     mov     dx,INT10 - PART_TSR     ; Note: DS=TSR segment!
     mov     ax,0x2510
     int     0x21                    ; DOS Set interrupt
     
-    mov     dx,CGAfont - PART_TSR
-    mov     ax,0x251f
+    ; Check if autopacther activation needed
+    cmp     byte [SETUP.AutoPatcher - PART_TSR],0
+    jz      .AutoPatcherNotActivated
+    
+    ; Get old INT 3 vector
+    mov     ax,0x3503
+    int     0x21
+    mov     [INT_3_original - PART_TSR],bx
+    mov     [INT_3_original - PART_TSR+2],es
+    
+    ; Set up new INT 3 vector
+    mov     dx,INT_3 - PART_TSR     ; Note: DS=TSR segment!
+    mov     ax,0x2503
     int     0x21
     
+.AutoPatcherNotActivated:
     ; Calculate size of TSR memory needed,
     ; and exit remaining resident
     mov     dx,Strings.M_Activated
@@ -314,13 +328,21 @@ DeactivateTsr:
     cmp     ax,bx
     jnz     ExitWithErrMessage      ; If not, error msg
 
-    ; Reset the old int 10
-    es mov  ax,[INT10.original - PART_TSR+2]
-    mov     ds,ax
-    es mov  dx,[INT10.original - PART_TSR]
+    ; Reset the old INT 10 vector
+    es lds  dx,[INT10.original - PART_TSR]
     mov     ax,0x2510               ; DOS Set interrupt
     int     0x21
-
+    
+    ; Check if autopacther was activated
+    cmp     byte [SETUP.AutoPatcher - PART_TSR],0
+    jz      .AutoPatcherNotActivated
+    
+    ; If it was, reset the old INT 3 vector
+    es lds  dx,[INT_3_original - PART_TSR]
+    mov     ax,0x2503               ; DOS Set interrupt
+    int     0x21
+.AutoPatcherNotActivated:
+    
     ; Free DOS memory of TSR
     mov     ax,es
     sub     ax,8
