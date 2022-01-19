@@ -22,8 +22,8 @@ malloc_InstStore:
                                 ; If there was an error, BX is the lagerst available block
     jc      .retry              ; Let's retry with that one
     ; AX= reserved memory segment address
-    cs mov  word [InstStoreAddress - PART_TSR],ax
-    cs mov  word [InstStoreAddress - PART_TSR + 2],0
+    cs mov  word [InstStoreAddress - PART_TSR + 2],ax   ; Segment
+    cs mov  word [InstStoreAddress - PART_TSR + 0],0    ; Offset
     cs mov  ax,word [InstStoreSize - PART_TSR]
     mov     cl,4
     shl     ax,cl
@@ -40,8 +40,8 @@ InitAutoPatcher:
     push    ds
     push    es
     
-    ; Check if InstStore already allocated
-    cs cmp  word [InstStoreAddress - PART_TSR],0
+    ; Check if InstStore already allocated (the segment part)
+    cs cmp  word [InstStoreAddress - PART_TSR + 2],0    ; Segment
     jz      malloc_InstStore
 .InstStore_allocated:
     
@@ -54,7 +54,7 @@ InitAutoPatcher:
     cld
 .find_next_MOV:
     ; Top pointer of InstStore
-    cs mov  ax,word [InstStoreAddress - PART_TSR + 2]
+    cs mov  ax,word [InstStoreAddress - PART_TSR]       ; Offset
     ; Compare to available
     cs cmp  ax,word [InstStoreSize - PART_TSR]
     jnb     Instrumented        ; If no more room for breakpoints, exit
@@ -141,7 +141,7 @@ CreateBreakPoint:
     mov     ds,bx
     mov     dx,si               ; Save SI for later use
     ; We load the TOP pointer of InstStore
-    cs les  di,[InstStoreAddress - PART_TSR]
+    cs les  di,[InstStoreAddress - PART_TSR]        ; Offset + Segment
     inc     di
     inc     di                  ; Skip address for now
     stosb                       ; Write Status
@@ -152,7 +152,7 @@ CreateBreakPoint:
     
     ; We take the opportunity, that DI points right after the last
     ; InstStore value, so we save it back for next time
-    cs mov  word [InstStoreAddress - PART_TSR + 2],di
+    cs mov  word [InstStoreAddress - PART_TSR],di   ; Offset
     
     ; Calculate physical address of CS:IP
     mov     ax,dx               ; AX=IP
@@ -286,7 +286,7 @@ INT_3:
     mov     ax,cs
     mov     es,ax               ; ES=CS
                                 ; DS=InstStore segment
-    mov     ds,word [InstStoreAddress - PART_TSR]
+    mov     ds,word [InstStoreAddress - PART_TSR + 2]   ; Segment
     
     ; Get InstStore of the original instruction
     mov     ax,word [bp+2]      ; Caller's CS
@@ -404,7 +404,7 @@ CSoverridden:
 InstStoreTable:
     times 17 dw 0
 InstStoreAddress:
-    dw      0,0
+    dw      0,0         ; Offset, Segment order
 InstStoreSize:
     dw      0
     
