@@ -14,7 +14,7 @@
 ;-------------------------------
 malloc_InstStore:
     mov     bx,0x0fff           ; 64k - 16 bytes in paragraphs
-.retry
+.retry:
     ; Save the InstStoreSize
     cs mov  word [InstStoreSize - PART_TSR],bx
     mov     ah,0x48             ; DOS reserve memory
@@ -135,7 +135,7 @@ CreateBreakPoint:
     push    es
     push    ds
     push    cx
-    
+
     mov     si,di               ; Move ES:DI into DS:SI
     mov     bx,es
     mov     ds,bx
