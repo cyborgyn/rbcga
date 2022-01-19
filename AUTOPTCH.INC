@@ -35,7 +35,7 @@ InitAutoPatcher:
 .find_next_MOV:
     mov     al,0x8e             ; MOV sreg,xxx first byte
     repne scasb                 ; ~1M cycles = 0.2s for 64k
-    jcxz    .instrumented
+    jcxz    Instrumented
     
     ; sreg3: ES=000, DS=011
     ; reg  : 000-111=AX,CX,DX,BX,SP,BP,SI,DI
@@ -68,9 +68,9 @@ MovConfirmed:
     
     pop     cx
     or      cx,cx
-    jnz     .find_next_MOV
+    jnz     InitAutoPatcher.find_next_MOV
 
-.instrumented:
+Instrumented:
     ; TODO: also implement POP DS,ES search and instrumentation (1F & 07)
     ; TODO: also implement LES reg and LDS reg search and instrumentation (C4 & C5)
     pop     es
@@ -115,7 +115,7 @@ CreateBreakPoint:
     mov     ds,bx
     mov     dx,si               ; Save SI for later use
     ; We load the TOP pointer of InstStore
-    cs les  di,dword [InstStoreAddress - PART_TSR]
+    cs les  di,[InstStoreAddress - PART_TSR]
     inc     di
     inc     di                  ; Skip address for now
     stosb                       ; Write Status
@@ -139,13 +139,13 @@ CreateBreakPoint:
     shl     bl,1                ; BX=InstStoreTable index
     
     ; Update InstStoreTable[bx + 1] to new end value
-    cs mov  word [InstStoreTable - PART_TSR + bx + 2],di
+    cs mov  word [bx + (InstStoreTable - PART_TSR + 2)],di
     
     sub     di,8                ; DI points to the InstStore.Address
     
-    cs cmp  word [InstStoreTable - PART_TSR + bx],0
+    cs cmp  word [bx + (InstStoreTable - PART_TSR)],0
     jnz     .entryStarted
-    cs mov  word [InstStoreTable - PART_TSR + bx],di
+    cs mov  word [bx + (InstStoreTable - PART_TSR)],di
 .entryStarted:
     stosw                       ; Write the phisical address to InstStore.Address
     inc     di                  ; Skip the status byte in InstStore
@@ -271,8 +271,8 @@ INT_3:
     add     ax,word [bp]        ; AX=Phisical Address lower 16 bits
     adc     bx,0                ; BX=Phisical Address upper 4 bits
     shl     bl,1                ; BX=InstStoreTable index
-    cs mov  si,word [InstStoreTable - PART_TSR + bx]
-    cs mov  di,word [InstStoreTable - PART_TSR + 2 + bx]
+    cs mov  si,word [bx + (InstStoreTable - PART_TSR)]
+    cs mov  di,word [bx + (InstStoreTable - PART_TSR + 2)]
     ; TODO: need some sanity checks
     
     ; Do a quick search for the Address
@@ -309,7 +309,7 @@ BreakPointFound:
     rep movsb                   ; Copy original instruction to simulation area
     
     test    al,0x80             ; Is it ES or DS modification?
-    mov     al,0x9090           ; 2xNOP instruction, for the case it's ES
+    mov     ax,0x9090           ; 2xNOP instruction, for the case it's ES
     jnz     .restorePrepared    ; We need to evaluate DS
                                 ; Else we need to eval ES, by jumping to alternate evaluation
     mov     ax,0xeb + (Evaluation.evalES - (Evaluation+2))*0x100    ; JMP instruction
@@ -362,7 +362,7 @@ Evaluation:
 
 CSoverridden:
     ; Let's override for simulation with ES instead
-    es mov  byte [.simulationArea - PART_TSR],0x26
+    es mov  byte [BreakPointFound.simulationArea - PART_TSR],0x26
     mov     es,word [bp+2]      ; ES= original CS
     jmp     BreakPointFound.prepareSimulation
 
