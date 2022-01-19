@@ -2,6 +2,7 @@
 ; Functions for CGA emulator, BIOS Char map access AutoPatcher
 ;----------------------------------------------------------------------------
 
+
 ;----------------------------------------------------------------------------
 ; InitAutoPatcher
 ; Initializes auto paching mechanism, by
@@ -11,6 +12,24 @@
 ; IN:
 ;   - Stack + 4: caller's CS:IP
 ;-------------------------------
+malloc_InstStore:
+    mov     bx,0x0fff           ; 64k - 16 bytes in paragraphs
+.retry
+    ; Save the InstStoreSize
+    cs mov  word [InstStoreSize - PART_TSR],bx
+    mov     ah,0x48             ; DOS reserve memory
+    int     0x21
+                                ; If there was an error, BX is the lagerst available block
+    jc      .retry              ; Let's retry with that one
+    ; AX= reserved memory segment address
+    cs mov  word [InstStoreAddress - PART_TSR],ax
+    cs mov  word [InstStoreAddress - PART_TSR + 2],0
+    cs mov  ax,word [InstStoreSize - PART_TSR]
+    mov     cl,4
+    shl     ax,cl
+    cs mov  word [InstStoreSize - PART_TSR],ax
+    jmp     InitAutoPatcher.InstStore_allocated
+    
 InitAutoPatcher:
     push    bp
     mov     bp,sp
@@ -21,7 +40,10 @@ InitAutoPatcher:
     push    ds
     push    es
     
-    ; TODO: Reserve memory area to work with, if needed
+    ; Check if InstStore already allocated
+    cs cmp  word [InstStoreAddress - PART_TSR],0
+    jz      malloc_InstStore
+.InstStore_allocated:
     
     mov     es,word [bp+(2+2)]  ; INT 10h caller's CS on stack
     ; Find E8 instructions on callers CS segment
@@ -31,6 +53,12 @@ InitAutoPatcher:
     inc     di
     cld
 .find_next_MOV:
+    ; Top pointer of InstStore
+    cs mov  ax,word [InstStoreAddress - PART_TSR + 2]
+    ; Compare to available
+    cs cmp  ax,word [InstStoreSize - PART_TSR]
+    jnb     Instrumented        ; If no more room for breakpoints, exit
+    
     mov     al,0x8e             ; MOV sreg,xxx first byte
     repne scasb                 ; ~1M cycles = 0.2s for 64k
     jcxz    Instrumented
@@ -257,8 +285,8 @@ INT_3:
     
     mov     ax,cs
     mov     es,ax               ; ES=CS
-    add     ax,InstStore - PART_TSR
-    mov     ds,ax               ; DS=InstStore segment
+                                ; DS=InstStore segment
+    mov     ds,word [InstStoreAddress - PART_TSR]
     
     ; Get InstStore of the original instruction
     mov     ax,word [bp+2]      ; Caller's CS
@@ -268,6 +296,9 @@ INT_3:
     shr     bx,cl               ; BX=CS upper 4 bits
     add     ax,word [bp]        ; AX=Phisical Address lower 16 bits
     adc     bx,0                ; BX=Phisical Address upper 4 bits
+    ; Actually the address points to next instruction, so we need to decrease
+    dec     ax
+    sbb     bx,0
     shl     bl,1                ; BX=InstStoreTable index
     cs mov  si,word [bx + (InstStoreTable - PART_TSR)]
     cs mov  di,word [bx + (InstStoreTable - PART_TSR + 2)]
@@ -285,7 +316,7 @@ Search:
     shl     bx,1
     shl     bx,1
     shl     bx,1                ; BX=InstStore pointer of index
-    cmp     ax,word [bx + (InstStore.Address - InstStore)]
+    cmp     ax,word [bx]
     jb      .smaller
     ja      .bigger
     jmp     BreakPointFound     ; If AX = InstStore.Address, we found it
@@ -374,8 +405,10 @@ InstStoreTable:
     times 17 dw 0
 InstStoreAddress:
     dw      0,0
+InstStoreSize:
+    dw      0
     
-    times 16-(($-PART_TSR) % 16) db 0xff   ; Padding to align InstStore to segment start
+;    times 16-(($-PART_TSR) % 16) db 0xff   ; Padding to align InstStore to segment start
 ;----------------------------------------------------------------------------
 ; InstStore contains an ordered list of 8 bytes per breakpoint
 ; The break point address needs to be binary searched
@@ -384,12 +417,14 @@ InstStoreAddress:
 ; 4 high phisical address bits indexes into InstStoreTable, which
 ; points to start of the range. The next index pointer is the
 ; upper bound.
-InstStore:
-.Address:       equ $-InstStore
-    dw      0
-.Status:        equ $-InstStore
-    db      0                   ; bit 0-2: Instruction length
-                                ; bit 3-6: Reserved, must be 0
-                                ; bit 7: 0 if ES, 1 if DS is modified
-.Instruction:   equ $-InstStore
-    times 5 nop                 ; Max length = 5: Prefix, 8E, Mod, disp16_L, disp16_H
+
+; This is dynamically allocated from DOS
+;InstStore:
+;.Address:       equ $-InstStore
+;    dw      0
+;.Status:        equ $-InstStore
+;    db      0                   ; bit 0-2: Instruction length
+;                                ; bit 3-6: Reserved, must be 0
+;                                ; bit 7: 0 if ES, 1 if DS is modified
+;.Instruction:   equ $-InstStore
+;    times 5 nop                 ; Max length = 5: Prefix, 8E, Mod, disp16_L, disp16_H
