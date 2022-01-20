@@ -23,7 +23,8 @@ malloc_InstStore:
     jc      .retry              ; Let's retry with that one
     ; AX= reserved memory segment address
     cs mov  word [InstStoreAddress - PART_TSR + 2],ax   ; Segment
-    cs mov  word [InstStoreAddress - PART_TSR + 0],0    ; Offset
+    ; Don't use 0 for offset, as InstStoreTable entry 0 has special meaning
+    cs mov  word [InstStoreAddress - PART_TSR + 0],8    ; Offset (let's start at number 1
     cs mov  ax,word [InstStoreSize - PART_TSR]
     mov     cl,4
     shl     ax,cl
@@ -160,6 +161,10 @@ CreateBreakPoint:
     mov     cl,12
     shr     bx,cl               ; BX=CS upper 4 bits
     mov     cx,ds
+    shl     cx,1
+    shl     cx,1
+    shl     cx,1
+    shl     cx,1
     add     ax,cx               ; AX=Phisical Address lower 16 bits
     adc     bx,0                ; BX=Phisical Address upper 4 bits
     shl     bl,1                ; BX=InstStoreTable index
@@ -292,7 +297,7 @@ INT_3:
     mov     ax,cs
     mov     es,ax               ; ES=CS
                                 ; DS=InstStore segment
-    mov     ds,word [InstStoreAddress - PART_TSR + 2]   ; Segment
+    cs mov  ds,word [InstStoreAddress - PART_TSR + 2]   ; Segment
     
     ; Get InstStore of the original instruction
     mov     ax,word [bp+2]      ; Caller's CS
@@ -300,7 +305,11 @@ INT_3:
     mov     dx,ax
     mov     cl,12
     shr     bx,cl               ; BX=CS upper 4 bits
-    add     ax,word [bp]        ; AX=Phisical Address lower 16 bits
+    shl     ax,1
+    shl     ax,1
+    shl     ax,1
+    shl     ax,1
+    add     ax,word [bp+4]      ; AX=Phisical Address lower 16 bits
     adc     bx,0                ; BX=Phisical Address upper 4 bits
     ; Actually the address points to next instruction, so we need to decrease
     dec     ax
@@ -323,7 +332,7 @@ Search:
     shl     bx,1
     shl     bx,1
     shl     bx,1                ; BX=InstStore pointer of index
-    cmp     ax,word [bx]
+    cs cmp  ax,word [bx]
     jb      .smaller
     ja      .bigger
     jmp     BreakPointFound     ; If AX = InstStore.Address, we found it
