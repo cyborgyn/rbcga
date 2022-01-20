@@ -117,11 +117,11 @@ IrqStack:
 .Regs:  equ $
 .Top:   equ $ - 0x20
 
+PART_AUTOPATCHER:
     ; Align CGAfont to 0E
 times   (0x0e - (($ - PART_TSR) % 16)) % 16   db  'x'
 CGAfont:
 %include "CGAFONT.INC"
-PART_AUTOPATCHER:
 %include "AUTOPTCH.INC"
 
 ;-----------------------------------------------------------

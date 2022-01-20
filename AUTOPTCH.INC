@@ -167,7 +167,7 @@ CreateBreakPoint:
     shl     cx,1
     add     ax,cx               ; AX=Phisical Address lower 16 bits
     adc     bx,0                ; BX=Phisical Address upper 4 bits
-    shl     bl,1                ; BX=InstStoreTable index
+    shl     bx,1                ; BX=InstStoreTable index
     
     ; Update TOP pointer
     cs mov  word [InstStoreAddress - PART_TSR],di
@@ -185,6 +185,10 @@ CreateBreakPoint:
     cs mov  word [bx + (InstStoreTable - PART_TSR)],cx
 .entryStarted:
     stosw                       ; Write the phisical address to InstStore.Address
+    shl     bx,1
+    shl     bx,1
+    es or   [di],bl             ; Save phys. addr. upper 4 bits into
+                                ; Status byte's bits 3-6
     inc     di                  ; Skip the status byte in InstStore
     
     pop     cx
@@ -204,6 +208,46 @@ CreateBreakPoint:
     mov     al,0x90             ; NOP instruction
     dec     cx                  ; CX = instruction length - 1
     rep stosb
+    ret
+
+;----------------------------------------------------------------------------
+; Remove breakpoint
+;-------------------------------
+RemoveBreakPoint:
+    push    ds
+    push    es
+    push    si
+    push    di
+    push    ax
+    push    bx
+    push    cx
+    cs mov  ds,word [InstStoreAddress - PART_TSR + 2]
+    cs mov  si,word [BreakPointChecked - PART_TSR]
+    
+    mov     di,word [si]
+    xor     ah,ah
+    lodsb                       ; Status byte
+    mov     cx,ax
+    and     cl,7                ; Length of instruction to restore
+    and     al,0b_1111_000
+    shr     ax,1
+    shr     ax,1
+    shr     ax,1
+    mov     es,ax               ; ES:DI points to original instruction's place
+    ; Restore original instruction
+    rep movsb
+    ; Indicate that this slot is not used anymore
+    mov     byte [si-6],0       ; Clear the status byte/length
+    
+    ; TODO: Mark InstStoreTable entry having empty slots
+    
+    pop     cx
+    pop     bx
+    pop     ax
+    pop     di
+    pop     si
+    pop     es
+    pop     ds
     ret
 
 ;----------------------------------------------------------------------------
@@ -261,7 +305,7 @@ EvalSegment:
     ret
 .needNoCorrection:
     ; TODO: check if it's pointing into the InstStore
-    ; TODO: remove breakpoint
+    call    RemoveBreakPoint
     ret
 
 ;----------------------------------------------------------------------------
@@ -273,7 +317,7 @@ EvalSegment:
 ; -   and returns
 ; TODO: Else checks the result pointing into InstStore
 ; TODO:   undoes all breakpoints above the new DS or ES
-; TODO: undoes breakpoint, removes from InstStore
+; - Remove breakpoint, removes from InstStore
 ; - end returns
 ; IN:
 ;   - Stack: caller's CS:IP
@@ -318,7 +362,8 @@ INT_3:
     ; Load table lower & upper bound indexes
     cs mov  si,word [bx + (InstStoreTable - PART_TSR)]
     cs mov  di,word [bx + (InstStoreTable - PART_TSR + 2)]
-    ; TODO: need some sanity checks
+    cmp     si,di
+    jnb     Search.NotFound
     
     ; Do a quick search for the Address
     ; Max 13 iterations, if the max number of 8191 breakpoints are installed
@@ -337,15 +382,31 @@ Search:
     ja      .bigger
     jmp     BreakPointFound     ; If AX = InstStore.Address, we found it
     
-    ; TODO: handle not found case!
 .smaller:
+    cmp     di,dx
+    jz      .NotFound
     mov     di,dx               ; If AX < InstStore.Address, DI=current index
     jmp     Search
 .bigger:
+    cmp     si,dx
+    jz      .NotFound
     mov     si,dx               ; If AX > InstStore.Address, SI=current index
     jmp     Search
+.NotFound:
+    cs mov  ds,word [REGSTORE.DS - PART_TSR]
+    cs mov  es,word [REGSTORE.ES - PART_TSR]
+    pop     di
+    pop     si
+    pop     dx
+    pop     cx
+    pop     bx
+    pop     ax
+    pop     bp
+    ; Call original INT 3
+    cs jmp far [INT_3_original - PART_TSR]
 
 BreakPointFound:
+    cs mov  word [BreakPointChecked - PART_TSR],bx
     mov     si,bx
     add     si,2
     mov     di,.simulationArea - PART_TSR
@@ -423,7 +484,9 @@ InstStoreAddress:
     dw      0,0         ; Offset, Segment order
 InstStoreSize:
     dw      0
-    
+BreakPointChecked:
+    dw      0           ; pointer to breakpoint which was recently checked
+
 ;    times 16-(($-PART_TSR) % 16) db 0xff   ; Padding to align InstStore to segment start
 ;----------------------------------------------------------------------------
 ; InstStore contains an ordered list of 8 bytes per breakpoint
