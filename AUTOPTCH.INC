@@ -243,6 +243,9 @@ RemoveBreakPoint:
     mov     es,ax               ; ES:DI points to original instruction's place
     mov     cx,dx
     and     cl,7                ; Length of instruction to restore
+    ; We rerun to the next instruction after IRET
+    dec     word [bp]
+    add     word [bp],cx
     ; Restore original instruction
     rep movsb
     
@@ -256,8 +259,6 @@ RemoveBreakPoint:
     pop     si
     pop     es
     pop     ds
-    ; Easyest: we rerun the instruction after IRET
-    dec     word [bp]
     ret
 
 ;----------------------------------------------------------------------------
