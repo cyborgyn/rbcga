@@ -309,7 +309,7 @@ INT_3:
     shl     ax,1
     shl     ax,1
     shl     ax,1
-    add     ax,word [bp+4]      ; AX=Phisical Address lower 16 bits
+    add     ax,word [bp]        ; AX=Phisical Address lower 16 bits
     adc     bx,0                ; BX=Phisical Address upper 4 bits
     ; Actually the address points to next instruction, so we need to decrease
     dec     ax
@@ -332,7 +332,7 @@ Search:
     shl     bx,1
     shl     bx,1
     shl     bx,1                ; BX=InstStore pointer of index
-    cs cmp  ax,word [bx]
+    cmp     ax,word [bx]
     jb      .smaller
     ja      .bigger
     jmp     BreakPointFound     ; If AX = InstStore.Address, we found it
