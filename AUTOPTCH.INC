@@ -212,6 +212,8 @@ CreateBreakPoint:
 
 ;----------------------------------------------------------------------------
 ; Remove breakpoint
+; IN:
+;   - BP: points to stack of IRET data
 ;-------------------------------
 RemoveBreakPoint:
     push    ds
@@ -224,9 +226,12 @@ RemoveBreakPoint:
     cs mov  ds,word [InstStoreAddress - PART_TSR + 2]
     cs mov  si,word [BreakPointChecked - PART_TSR]
     
-    mov     di,word [si]
-    xor     ah,ah
+    lodsw
+    mov     di,ax
     lodsb                       ; Status byte
+    xor     ah,ah
+    ; Indicate that this slot is not used anymore
+    mov     byte [si-1],ah      ; Clear the status byte/length
     mov     cx,ax
     and     cl,7                ; Length of instruction to restore
     and     al,0b_1111_000
@@ -236,8 +241,6 @@ RemoveBreakPoint:
     mov     es,ax               ; ES:DI points to original instruction's place
     ; Restore original instruction
     rep movsb
-    ; Indicate that this slot is not used anymore
-    mov     byte [si-6],0       ; Clear the status byte/length
     
     ; TODO: Mark InstStoreTable entry having empty slots
     
@@ -248,6 +251,8 @@ RemoveBreakPoint:
     pop     si
     pop     es
     pop     ds
+    ; Easyest: we rerun the instruction after IRET
+    dec     word [bp]
     ret
 
 ;----------------------------------------------------------------------------
@@ -289,6 +294,7 @@ GetInstructionLength:
 ; If not, corrects it
 ; IN:
 ;   - AX: segment
+;   - BP: points on stack to IRET data
 ; OUT:
 ;   - AX= corrected segment
 ;-------------------------------
@@ -448,21 +454,29 @@ Evaluation:
 
 .evalDS:
     ; We evaluate DS here, and restore ES in the end
+    push    bp
+    mov     bp,sp
+    add     bp,2
     push    ax
     mov     ax,ds
     call    EvalSegment
     mov     ds,ax
     pop     ax
+    pop     bp
     cs mov  es,word [REGSTORE.ES - PART_TSR]
     iret
 
 .evalES:
     ; We evaluate ES here, and restore DS in the end
+    push    bp
+    mov     bp,sp
+    add     bp,2
     push    ax
     mov     ax,es
     call    EvalSegment
     mov     es,ax
     pop     ax
+    pop     bp
     cs mov  ds,word [REGSTORE.DS - PART_TSR]
     iret
 
