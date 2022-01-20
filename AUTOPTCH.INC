@@ -164,14 +164,20 @@ CreateBreakPoint:
     adc     bx,0                ; BX=Phisical Address upper 4 bits
     shl     bl,1                ; BX=InstStoreTable index
     
-    ; Update InstStoreTable[bx + 1] to new end value
-    cs mov  word [bx + (InstStoreTable - PART_TSR + 2)],di
-    
+    ; Update TOP pointer
+    cs mov  word [InstStoreAddress - PART_TSR],di
+    ; Update InstStoreTable[bx + 1] to new end value index
+    mov     cx,di
+    shr     cx,1
+    shr     cx,1
+    shr     cx,1
+    cs mov  word [bx + (InstStoreTable - PART_TSR + 2)],cx
     sub     di,8                ; DI points to the InstStore.Address
     
     cs cmp  word [bx + (InstStoreTable - PART_TSR)],0
     jnz     .entryStarted
-    cs mov  word [bx + (InstStoreTable - PART_TSR)],di
+    dec     cx
+    cs mov  word [bx + (InstStoreTable - PART_TSR)],cx
 .entryStarted:
     stosw                       ; Write the phisical address to InstStore.Address
     inc     di                  ; Skip the status byte in InstStore
@@ -300,6 +306,7 @@ INT_3:
     dec     ax
     sbb     bx,0
     shl     bl,1                ; BX=InstStoreTable index
+    ; Load table lower & upper bound indexes
     cs mov  si,word [bx + (InstStoreTable - PART_TSR)]
     cs mov  di,word [bx + (InstStoreTable - PART_TSR + 2)]
     ; TODO: need some sanity checks
@@ -398,9 +405,9 @@ CSoverridden:
 ;----------------------------------------------------------------------------
 ; InstStoreTable stores 16 pointers to InstStore's first entries of
 ; that high 4 bit addresses of the 20 bit address space
-; Phisical address bits: |19|18|17|16| |15|14|13|...| 3| 2| 1| 0|
-;                        +--+--+--+--+ +--+--+--+...+--+--+--+--+
-;                        IST[0..4]     IS[?].Address   | Free slot cnt
+; Phisical address bits: |19|18|17|16| |15|14|13|12|...| 3| 2| 1| 0|
+;                        +--+--+--+--+ +--+--+--+--+..+--+--+--+--+
+;                        IST[0..4]     | r| r| r|IS[?].Address / 8
 InstStoreTable:
     times 17 dw 0
 InstStoreAddress:
