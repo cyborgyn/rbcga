@@ -157,15 +157,18 @@ CreateBreakPoint:
     
     ; Calculate physical address of CS:IP
     mov     ax,dx               ; AX=IP
-    mov     bx,ds               ; BX=CS
+    
     mov     cl,12
+    mov     bx,ds               ; BX=CS
     shr     bx,cl               ; BX=CS upper 4 bits
+    
     mov     cx,ds
     shl     cx,1
     shl     cx,1
     shl     cx,1
     shl     cx,1
     add     ax,cx               ; AX=Phisical Address lower 16 bits
+    
     adc     bx,0                ; BX=Phisical Address upper 4 bits
     shl     bx,1                ; BX=InstStoreTable index
     
@@ -223,6 +226,7 @@ RemoveBreakPoint:
     push    ax
     push    bx
     push    cx
+    push    dx
     cs mov  ds,word [InstStoreAddress - PART_TSR + 2]
     cs mov  si,word [BreakPointChecked - PART_TSR]
     
@@ -232,18 +236,19 @@ RemoveBreakPoint:
     xor     ah,ah
     ; Indicate that this slot is not used anymore
     mov     byte [si-1],ah      ; Clear the status byte/length
-    mov     cx,ax
-    and     cl,7                ; Length of instruction to restore
+    mov     dx,ax
     and     al,0b_1111_000
-    shr     ax,1
-    shr     ax,1
-    shr     ax,1
+    mov     cl,9
+    shl     ax,cl
     mov     es,ax               ; ES:DI points to original instruction's place
+    mov     cx,dx
+    and     cl,7                ; Length of instruction to restore
     ; Restore original instruction
     rep movsb
     
     ; TODO: Mark InstStoreTable entry having empty slots
     
+    pop     dx
     pop     cx
     pop     bx
     pop     ax

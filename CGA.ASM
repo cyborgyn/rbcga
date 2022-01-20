@@ -44,6 +44,7 @@ INT10:          ; Entry point for Int10
     cmp     ah,.F_CGACOM
     jz      .F_cga_com_functions    ; ah = 'C'
 
+.Exit:
     ; for non-handled function, jump to original int handler
     db 0xEA     ; JMP FAR
 .original:
@@ -80,20 +81,34 @@ INT10:          ; Entry point for Int10
     iret
 
 Init640x200:
+%ifndef DOSBOX
     call    InitCGA640x200x2        ; Defined in CGA640S.INC
+%endif
     cs cmp  byte [SETUP.AutoPatcher - PART_TSR],0
     jz      .NoAutoPatcher
     call    InitAutoPatcher         ; If AutoPatcher loaded, initialize it
 .NoAutoPatcher:                     ; Defined in AUTOPTCH.INC
+%ifndef DOSBOX
     iret
+%else
+    jmp     INT10.Exit
+%endif
 
 InitChar80:
+%ifndef DOSBOX
     call    InitCGAChar80x25         ; Defined in CGA640S.INC
+%else
+    jmp     INT10.Exit
+%endif
     cs cmp  byte [SETUP.AutoPatcher - PART_TSR],0
     jz      .NoAutoPatcher
     call    DestroyAutoPatcher      ; If AutoPatcher loaded, deinitialize it
 .NoAutoPatcher:                     ; Defined in AUTOPTCH.INC
+%ifndef DOSBOX
     iret
+%else
+    jmp     INT10.Exit
+%endif
 
 INT_3_original:
     dw      0,0
