@@ -12,7 +12,7 @@
 ; IN:
 ;   - Stack + 4: caller's CS:IP
 ;-------------------------------
-malloc_InstStore:
+Malloc_InstStore:
     mov     bx,0x0fff           ; 64k - 16 bytes in paragraphs
 .retry:
     ; Save the InstStoreSize
@@ -29,7 +29,7 @@ malloc_InstStore:
     mov     cl,4
     shl     ax,cl
     cs mov  word [InstStoreSize - PART_TSR],ax
-    jmp     InitAutoPatcher.InstStore_allocated
+    ret
     
 InitAutoPatcher:
     push    bp
@@ -43,7 +43,7 @@ InitAutoPatcher:
     
     ; Check if InstStore already allocated (the segment part)
     cs cmp  word [InstStoreAddress - PART_TSR + 2],0    ; Segment
-    jz      malloc_InstStore
+    call    Malloc_InstStore
 .InstStore_allocated:
     
     mov     es,word [bp+(2+2)]  ; INT 10h caller's CS on stack

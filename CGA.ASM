@@ -57,14 +57,13 @@ INT10:          ; Entry point for Int10
     jz      InitChar80
     cmp     al,03                   ; 80x25 16 color text (CGA,EGA,MCGA,VGA)
     jz      InitChar80
-    stc
     iret
 
 .F_cga_com_functions:
     cmp     al,.F_CGACOM_DISPSEG
     jb      .F_detection_function   ; al = 00
     jz      .F_get_siplay_segment   ; al = 01
-    stc
+    ja      .F_allocate_memory      ; al = 02
     iret
 
     ; Returns AX=currently used display segment
@@ -78,6 +77,9 @@ INT10:          ; Entry point for Int10
     mov     ax,cs
     mov     es,ax
     mov     ax,.Magic
+    iret
+.F_allocate_memory:
+    call    Malloc_InstStore
     iret
 
 Init640x200:
@@ -170,6 +172,21 @@ PART_INSTALLER:
     mov     ax,0x2510
     int     0x21                    ; DOS Set interrupt
     
+    ; Calculate memory reservation for TSR
+    ; If TSR is configured in test mode,
+    ; display mem comes right after the TSR
+    cmp     word [SETUP.DisplaySeg - PART_TSR],0xb800
+    jz      .StandardMemory
+
+    ; The memory size = TSR + 16k display ram
+    mov     dx,(PART_INSTALLER - PART_TSR) / 0x10 + 8 + 1 + 0x400
+    jmp     .MemorySizeReady
+.StandardMemory:
+    ; The memory size in pragraphs to reserve
+    mov     dx,(PART_INSTALLER - PART_TSR) / 0x10 + 8 + 1
+.MemorySizeReady:
+    push    dx
+    
     ; Check if autopacther activation needed
     cmp     byte [SETUP.AutoPatcher - PART_TSR],0
     jz      .AutoPatcherNotActivated
@@ -185,26 +202,26 @@ PART_INSTALLER:
     mov     ax,0x2503
     int     0x21
     
+    ; Lower current memory reservation
+    pop     bx                      ; Required memory size for TSR
+    push    bx
+    push    cs
+    pop     es                      ; ES: segment, BX: new size
+    mov     ah,0x4a
+    int     0x21
+    
+    ; Allocate memory
+    mov     ax,0xff02
+    int     0x10
+    
 .AutoPatcherNotActivated:
-    ; Calculate size of TSR memory needed,
-    ; and exit remaining resident
+    ; Exit remaining resident
     mov     dx,Strings.M_Activated
     push    ds
     call    Print
     pop     ds
-
-    ; If TSR is configured in test mode,
-    ; display mem comes right after the TSR
-    cmp     word [SETUP.DisplaySeg - PART_TSR],0xb800
-    jz      .StandardMemory
-
-    ; The memory size = TSR + 16k display ram
-    mov     dx,(PART_INSTALLER - PART_TSR) / 0x10 + 8 + 1 + 0x400
-    jmp     .Exit
-.StandardMemory:
-    ; The memory size in pragraphs to reserve
-    mov     dx,(PART_INSTALLER - PART_TSR) / 0x10 + 8 + 1
-.Exit:
+    
+    pop     dx                      ; Required memory size for TSR
     mov     ax,0x3100
     int     0x21
 
