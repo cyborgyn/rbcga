@@ -322,7 +322,7 @@ EvalSegment:
 ;       Except if it's bigger than F000, then it points fake BIOS Char Map
 ;-------------------------------
 Break:
-.IP         dw 0
+.IP:        dw 0
 .CS:        dw 0
 
 INT_3:
@@ -350,7 +350,7 @@ INT_3:
     mov     es,ax               ; ES:DI = CS:Break.IP
     mov     di,(Break.IP - PART_TSR)
                                 ; DS:SI = original SS:SP
-    cs lds  si,word [REGSTORE3.SP - PART_TSR]
+    cs lds  si,[REGSTORE3.SP - PART_TSR]
     ; Copy breakpoint data
     lodsw                       ; Copy breakpoint IP
     dec     ax                  ; pointing to INT3 instead after it
@@ -361,7 +361,7 @@ INT_3:
     cs mov  ds,word [InstStoreAddress - PART_TSR + 2]   ; Segment
     
     ; Get InstStore of the original instruction
-    cs mov  ax,word [Break.CS]  ; Caller's CS
+    cs mov  ax,word [Break.CS - PART_TSR]  ; Caller's CS
     mov     bx,ax
     mov     dx,ax
     mov     cl,12
@@ -370,7 +370,7 @@ INT_3:
     shl     ax,1
     shl     ax,1
     shl     ax,1
-    cs add  ax,word [Break.IP]  ; AX=Phisical Address lower 16 bits
+    cs add  ax,word [Break.IP - PART_TSR]  ; AX=Phisical Address lower 16 bits
     adc     bx,0                ; BX=Phisical Address upper 4 bits
     shl     bl,1                ; BX=InstStoreTable index
     ; Load table lower & upper bound indexes
