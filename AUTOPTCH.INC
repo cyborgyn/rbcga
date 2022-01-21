@@ -214,54 +214,6 @@ CreateBreakPoint:
     ret
 
 ;----------------------------------------------------------------------------
-; Remove breakpoint
-; IN:
-;   - BP: points to stack of IRET data
-;-------------------------------
-RemoveBreakPoint:
-    push    ds
-    push    es
-    push    si
-    push    di
-    push    ax
-    push    bx
-    push    cx
-    push    dx
-    cs mov  ds,word [InstStoreAddress - PART_TSR + 2]
-    cs mov  si,word [BreakPointChecked - PART_TSR]
-    
-    lodsw
-    mov     di,ax
-    lodsb                       ; Status byte
-    xor     ah,ah
-    ; Indicate that this slot is not used anymore
-    mov     byte [si-1],ah      ; Clear the status byte/length
-    mov     dx,ax
-    and     al,0b_1111_000
-    mov     cl,9
-    shl     ax,cl
-    mov     es,ax               ; ES:DI points to original instruction's place
-    mov     cx,dx
-    and     cl,7                ; Length of instruction to restore
-    ; We rerun to the next instruction after IRET
-    dec     word [bp]
-    add     word [bp],cx
-    ; Restore original instruction
-    rep movsb
-    
-    ; TODO: Mark InstStoreTable entry having empty slots
-    
-    pop     dx
-    pop     cx
-    pop     bx
-    pop     ax
-    pop     di
-    pop     si
-    pop     es
-    pop     ds
-    ret
-
-;----------------------------------------------------------------------------
 ; Calculates instruction length according to mod/rm byte
 ; If there is segment prefix, it counts as well, and decrements DI
 ; IN:
@@ -300,24 +252,54 @@ GetInstructionLength:
 ; If not, corrects it
 ; IN:
 ;   - AX: segment
-;   - BP: points on stack to IRET data
 ; OUT:
-;   - AX= corrected segment
+;   - AX= corrected segment, or same
 ;-------------------------------
 EvalSegment:
     cmp     ax,0xf000
     jb      .needNoCorrection
     
-    push    bx                  ; Needs correction
     mov     bx,0xffa6 - ((CGAfont - PART_TSR) / 0x10)
     sub     bx,ax
     mov     ax,cs
     sub     ax,bx               ; AX = CS - (FFA6 - AX - CGAfont.seg)
-    pop     bx                  ; Needs: CS > 1000 !!!!
+                                ; Needs: CS > 1000 !!!!
     ret
+
 .needNoCorrection:
     ; TODO: check if it's pointing into the InstStore
-    call    RemoveBreakPoint
+    
+;-------------------------------
+; Remove breakpoint
+;-------------------------------
+    push    ax                  ; We don't alter loaded segment
+    cs mov  ds,word [InstStoreAddress - PART_TSR + 2]
+    cs mov  si,word [BreakPointChecked - PART_TSR]
+    
+    lodsw
+    mov     di,ax               ; AX = DI = breakpoint phys address lower 16 bits
+    lodsb                       ; Status byte
+    xor     ah,ah
+    ; Indicate that this slot is not used anymore
+    mov     byte [si-1],ah      ; Clear the status byte/length
+    mov     dx,ax
+    and     al,0b_1111_000
+    mov     cl,9
+    shl     ax,cl
+    mov     es,ax               ; ES:DI points to original instruction's place
+    and     dl,7
+    mov     cx,dx               ; Length of instruction to restore
+    ; Restore original instruction
+    rep movsb
+    
+    ; We rerun to the next instruction after IRET
+    cs lds  bx,[REGSTORE3.SP - PART_TSR]
+    dec     word [bx]
+    add     word [bx],dx
+    
+    ; TODO: Mark InstStoreTable entry having empty slots
+    
+    pop     ax                  ; Return simulated segment load without change
     ret
 
 ;----------------------------------------------------------------------------
@@ -327,36 +309,59 @@ EvalSegment:
 ; - Checks result if DS or ES >= F000
 ; -   Sets return DS or ES to point to fake char map
 ; -   and returns
-; TODO: Else checks the result pointing into InstStore
-; TODO:   undoes all breakpoints above the new DS or ES
-; - Remove breakpoint, removes from InstStore
-; - end returns
+; - Else
+; TODO: If the result pointing into InstStore
+; TODO:   Disables all breakpoints above the new DS or ES
+; TODO:     How to later reenable them???
+; -   Removes breakpoint
+; - Returns to next instruction
 ; IN:
 ;   - Stack: caller's CS:IP
 ; OUT:
 ;   - ES or DS set as it would be with original instruction
 ;       Except if it's bigger than F000, then it points fake BIOS Char Map
 ;-------------------------------
+Break:
+.IP         dw 0
+.CS:        dw 0
+
 INT_3:
-    cs mov  word [REGSTORE.DS - PART_TSR],ds
-    cs mov  word [REGSTORE.ES - PART_TSR],es
-    push    bp
-    mov     bp,sp
-    add     bp,2                ; BP points to stack on function entry
+    ; Save CPU state
+    cs mov  word [REGSTORE3.SP - PART_TSR],sp
+    cs mov  word [REGSTORE3.SS - PART_TSR],ss
+    ; Setup new stack
+    mov     sp,cs
+    mov     ss,sp
+    mov     sp,(Int3Stack.Top - PART_TSR)
+    
     push    ax
     push    bx
     push    cx
     push    dx
     push    si
     push    di
-    
+    push    bp
+    push    ds
+    push    es
+.SP_TOP:    equ (Int3Stack.Top - PART_TSR) - 9*2
+
+    cld
     mov     ax,cs
-    mov     es,ax               ; ES=CS
+    mov     es,ax               ; ES:DI = CS:Break.IP
+    mov     di,(Break.IP - PART_TSR)
+                                ; DS:SI = original SS:SP
+    cs lds  si,word [REGSTORE3.SP - PART_TSR]
+    ; Copy breakpoint data
+    lodsw                       ; Copy breakpoint IP
+    dec     ax                  ; pointing to INT3 instead after it
+    stosw
+    movsw                       ; Copy breakpoint CS
+    
                                 ; DS=InstStore segment
     cs mov  ds,word [InstStoreAddress - PART_TSR + 2]   ; Segment
     
     ; Get InstStore of the original instruction
-    mov     ax,word [bp+2]      ; Caller's CS
+    cs mov  ax,word [Break.CS]  ; Caller's CS
     mov     bx,ax
     mov     dx,ax
     mov     cl,12
@@ -365,11 +370,8 @@ INT_3:
     shl     ax,1
     shl     ax,1
     shl     ax,1
-    add     ax,word [bp]        ; AX=Phisical Address lower 16 bits
+    cs add  ax,word [Break.IP]  ; AX=Phisical Address lower 16 bits
     adc     bx,0                ; BX=Phisical Address upper 4 bits
-    ; Actually the address points to next instruction, so we need to decrease
-    dec     ax
-    sbb     bx,0
     shl     bl,1                ; BX=InstStoreTable index
     ; Load table lower & upper bound indexes
     cs mov  si,word [bx + (InstStoreTable - PART_TSR)]
@@ -405,15 +407,17 @@ Search:
     mov     si,dx               ; If AX > InstStore.Address, SI=current index
     jmp     Search
 .NotFound:
-    cs mov  ds,word [REGSTORE.DS - PART_TSR]
-    cs mov  es,word [REGSTORE.ES - PART_TSR]
+    pop     es
+    pop     ds
+    pop     bp
     pop     di
     pop     si
     pop     dx
     pop     cx
     pop     bx
     pop     ax
-    pop     bp
+    cs mov  sp,word [REGSTORE3.SP - PART_TSR]
+    cs mov  ss,word [REGSTORE3.SS - PART_TSR]
     ; Call original INT 3
     cs jmp far [INT_3_original - PART_TSR]
 
@@ -432,64 +436,79 @@ BreakPointFound:
                                 ; Else we need to eval ES, by jumping to alternate evaluation
     mov     ax,0xeb + (Evaluation.evalES - (Evaluation+2))*0x100    ; JMP instruction
 .restorePrepared:
+    mov     di,Evaluation - PART_TSR
     stosw                       ; Write the JMP or NOP instructions to help evaluation
     
     es cmp  byte [.simulationArea - PART_TSR],0x2e  ; CS segment override prefix
     jz      CSoverridden
     
     ; By default we restore DS & ES. However, if CS prefix is used, we substitute it with ES
-    cs mov  es,word [REGSTORE.ES - PART_TSR]
+    pop     es
 .prepareSimulation:
-    cs mov  ds,word [REGSTORE.DS - PART_TSR]
-    pop     di                  ; Restore register values of the running program
-    pop     si                  ; 'cause we don't know which one will be used
-    pop     dx                  ; during simulation (could be any)
+    pop     ds
+    pop     bp                  ; Restore register values of the running program
+    pop     di                  ; 'cause we don't know which one will be used
+    pop     si                  ; during simulation (could be any)
+    pop     dx
     pop     cx
     pop     bx
     pop     ax
-    pop     bp                  ; Note: even SS:BP indexing should work
+    cs mov  sp,word [REGSTORE3.SP - PART_TSR]
+    cs mov  ss,word [REGSTORE3.SS - PART_TSR]
 .simulationArea:
     nop                         ; This will be a MOV {DS,ES}, something
     nop
     nop
     nop
     nop
+    
+    mov     sp,cs               ; Restore INT3 stack with saved registers
+    mov     ss,sp
+    mov     sp,INT_3.SP_TOP
+
 Evaluation:
     ; JMP .evalES instruction
     dw      0xeb + (Evaluation.evalES - (Evaluation+2))*0x100
 
 .evalDS:
     ; We evaluate DS here, and restore ES in the end
-    push    bp
-    mov     bp,sp
-    add     bp,2
-    push    ax
+    
     mov     ax,ds
     call    EvalSegment
     mov     ds,ax
+    
+    pop     es
+    inc     sp                  ; We simply discard DS loading
+    inc     sp                  ; ..and it's faster
+.ExitInt3:
+    pop     bp                  ; Restore all other CPU state
+    pop     di
+    pop     si
+    pop     dx
+    pop     cx
+    pop     bx
     pop     ax
-    pop     bp
-    cs mov  es,word [REGSTORE.ES - PART_TSR]
+    cs mov  sp,word [REGSTORE3.SP - PART_TSR]
+    cs mov  ss,word [REGSTORE3.SS - PART_TSR]
     iret
 
 .evalES:
     ; We evaluate ES here, and restore DS in the end
-    push    bp
-    mov     bp,sp
-    add     bp,2
-    push    ax
     mov     ax,es
     call    EvalSegment
     mov     es,ax
-    pop     ax
-    pop     bp
-    cs mov  ds,word [REGSTORE.DS - PART_TSR]
-    iret
+
+    inc     sp                  ; We simply discard ES loading
+    inc     sp                  ; ..and it's faster
+    pop     ds
+    jmp     .ExitInt3
 
 CSoverridden:
     ; Let's override for simulation with ES instead
     es mov  byte [BreakPointFound.simulationArea - PART_TSR],0x26
-    mov     es,word [bp+2]      ; ES= original CS
+    mov     es,word [Break.CS - PART_TSR]
+    inc     sp                  ; We skip restoring ES from stack
+    inc     sp
     jmp     BreakPointFound.prepareSimulation
 
 ;----------------------------------------------------------------------------

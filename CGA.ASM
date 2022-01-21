@@ -126,13 +126,18 @@ SETUP:
 REGSTORE:   ; SS,SP temp storage during IRQ
 .SS:    dw      0
 .SP:    dw      0
-.DS:    dw      0
-.ES:    dw      0
+REGSTORE3:
+.SP     dw      0
+.SS:    dw      0
 
 IrqStack:
     times 0x80 db 0
 .Regs:  equ $
 .Top:   equ $ - 0x20
+
+Int3Stack:
+    times 0x80 db 0
+.Top:   equ $
 
 PART_AUTOPATCHER:
     ; Align CGAfont to 0E
