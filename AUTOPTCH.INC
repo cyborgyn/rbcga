@@ -43,6 +43,7 @@ InitAutoPatcher:
     
     ; Check if InstStore already allocated (the segment part)
     cs cmp  word [InstStoreAddress - PART_TSR + 2],0    ; Segment
+    jnz     .InstStore_allocated
     call    Malloc_InstStore
 .InstStore_allocated:
     
