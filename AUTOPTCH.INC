@@ -255,10 +255,13 @@ GetInstructionLength:
     cmp     al,MOD_INS4_RM
     jb      .mod_ins3_rm        ; It's a mode instruction3 r/m byte
     jz      .mod_ins4_rm        ; It's a mode instruction4 r/m byte
+    cmp     al,MOD_REG_MEM
+    jz      .mod_mem_check      ; If it's a mode reg mem byte, mode 11 is invalid
 .mod_ins5_rm:                   ; Else it's a mode instruction5 r/m byte
     and     ah,0b_00_111_000    ; Get the extended instruction part
     cmp     ah,0b_00_111_000    ; Only instruction 111 is not defined
     jz      .ExitInvalid
+.mod_mem_check:
     mov     ah,bh
     and     ah,0b_11_000_000    ; Check mode part
     cmp     ah,0b_11_000_000    ; JMP or CALL with register is invalid
