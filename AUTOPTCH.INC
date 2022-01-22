@@ -2,24 +2,17 @@
 ; Functions for CGA emulator, BIOS Char map access AutoPatcher
 ;----------------------------------------------------------------------------
 
-
 ;----------------------------------------------------------------------------
-; InitAutoPatcher
-; Initializes auto paching mechanism, by
-; - Builds up breakpoint table
-; - Finds MOV {DS,ES},r/m instructions in CS segment
-; - Replaces MOVs with INT3 + n*NOP
-; IN:
-;   - Stack + 4: caller's CS:IP
+; Allocate memory for breakpoints
 ;-------------------------------
 Malloc_InstStore:
-    mov     bx,0x0fff           ; 64k - 16 bytes in paragraphs
+    mov     bx,0x0800           ; 32k bytes in paragraphs, this is enought for 4096 break points
 .retry:
     ; Save the InstStoreSize
     cs mov  word [InstStoreSize - PART_TSR],bx
     mov     ah,0x48             ; DOS reserve memory
     int     0x21
-                                ; If there was an error, BX is the lagerst available block
+                                ; If there was an error, BX is the largest available block
     jc      .retry              ; Let's retry with that one
     ; AX= reserved memory segment address
     cs mov  word [InstStoreAddress - PART_TSR + 2],ax   ; Segment
@@ -31,6 +24,15 @@ Malloc_InstStore:
     cs mov  word [InstStoreSize - PART_TSR],ax
     ret
     
+;----------------------------------------------------------------------------
+; InitAutoPatcher
+; Initializes auto paching mechanism, by
+; - Builds up breakpoint table
+; - Finds MOV {DS,ES},r/m instructions in CS segment
+; - Replaces MOVs with INT3 + n*NOP
+; IN:
+;   - Stack + 4: caller's CS:IP
+;-------------------------------
 InitAutoPatcher:
     push    bp
     mov     bp,sp
@@ -232,8 +234,9 @@ GetInstructionLength:
     and     ah,0b_11_000_000    ; Mask out r/m part also
     jz      .ModRmSizeReady     ; Mod 00 -> just index, no more bytes (special case already handled)
     cmp     ah,0b_10_000_000
-    ja      .ModRmSizeReady     ; Mod 11 -> just registers, no more bytes
-    jb      .IncLen             ; Mod 01 -> disp8, 1 more bytes
+    ja      .haveNoSegPrefix    ; Mod 11 -> just registers, no more bytes
+                                ; In this case, segment prefix is also non-sense
+    jb      .IncLen             ; Mod 01 -> disp8, 1 more byte
 .IncLen2:
     inc     cx                  ; Mod 10 -> disp16, 2 more bytes
 .IncLen:
