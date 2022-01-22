@@ -145,6 +145,7 @@ times   (0x0e - (($ - PART_TSR) % 16)) % 16   db  'x'
 CGAfont:
 %include "CGAFONT.INC"
 %include "AUTOPTCH.INC"
+%include "INSTDEF.INC"
 
 ;-----------------------------------------------------------
 ; This is the TSR installer code

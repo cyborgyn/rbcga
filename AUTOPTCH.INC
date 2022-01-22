@@ -38,7 +38,9 @@ InitAutoPatcher:
     mov     bp,sp
     add     bp,2                ; BP points to stack on function entry
     push    ax
+    push    bx
     push    cx
+    push    dx
     push    di
     push    ds
     push    es
@@ -48,6 +50,8 @@ InitAutoPatcher:
     jnz     .InstStore_allocated
     call    Malloc_InstStore
 .InstStore_allocated:
+    mov     ax,cs
+    mov     ds,ax               ; DS = CS // needs the instruction length calculator
     
     mov     es,word [bp+(2+2)]  ; INT 10h caller's CS on stack
     ; Find E8 instructions on callers CS segment
@@ -72,8 +76,7 @@ InitAutoPatcher:
     ; mod  : 00=disp0, 01=disp8, 10=disp16, 11=reg
     ; 10001110 : 11 sreg3 reg -> 1 bytes
     ; 10001110 : mod sreg3 r/m
-    es mov  al,byte [di]        ; Load Mod/sreg/rm byte
-    mov     ah,al               ; Save for later use
+    mov     al,byte [di]        ; Load Mod/sreg/rm byte
     and     al,0b_00_111_000
     jz      MovConfirmed.ds_or_es   ; it's a MOV ES,something since ES=000
     cmp     al,0b_00_011_000
@@ -86,16 +89,21 @@ MovConfirmed:
     mov     al,0x80             ; InstStore.Status flag: DS
                                 ; If it was ES, AL already = 00
 .ds_or_es:                      ; It is MOV ES,xxx or MOV DS,xxx
+    mov     dl,al               ; Save state byte for later use
     push    cx
     dec     di                  ; ES:DI points to instruction
     
     ; Let's calculate instruction length with prefix included
+    ; DS = CS, ES:DI: current instruction, AL,AH: instruction, mode r/m byte
+    mov     ax,word [di]        ; Load instruction + 1 byte (probably mode reg r/m)
     call    GetInstructionLength
     ; CX = instruction length
+    jcxz    .invalid            ; Skip creating breakpoint, if it's invalid
+    mov     al,dl               ; restore state byte
     or      al,cl               ; Set length (bit 0-2) in status byte
     ; Create a breakpoint at ES:DI
     call    CreateBreakPoint
-    
+.invalid:
     pop     cx
     or      cx,cx
     jnz     InitAutoPatcher.find_next_MOV
@@ -106,7 +114,9 @@ Instrumented:
     pop     es
     pop     ds
     pop     di
+    pop     dx
     pop     cx
+    pop     bx
     pop     ax
     pop     bp
     ret
@@ -220,14 +230,68 @@ CreateBreakPoint:
 ; Calculates instruction length according to mod/rm byte
 ; If there is segment prefix, it counts as well, and decrements DI
 ; IN:
-;   - AH: mod/rm byte
+;   - DS: CS
+;   - AL: instruction
+;   - AH: mod/rm byte (if any)
 ;   - ES:DI: points to instruction
 ; OUT:
 ;   - CX= length of instruction
 ;   - ES:DI= pointer to instruction with prefix (if exisits)
 ;-------------------------------
 GetInstructionLength:
-    mov     cx,2                ; Since we surely have instruction + mod/rm byte
+    ; Setup DS:BX for xlat
+    xor     cx,cx
+    mov     bx,(Instructions - PART_TSR)
+    xlat
+    mov     cl,al
+    jcxz    .Exit               ; If AL = 0, it's an invalid instruction
+    mov     bh,ah               ; Save AH for later reuse
+    and     cl,0b_00000111      ; From instruction description we use length
+    and     al,0b_00_111_000    ; Mask out mode r/m type
+    jz      .Exit               ; If not have any kind of mode r/m byte, we have the length already
+    cmp     al,MOD_INS2_RM
+    jb      .mod_reg_rm         ; It has regular mode reg r/m byte
+    jz      .mod_ins2_rm        ; It's a mode instruction2 r/m byte
+    cmp     al,MOD_INS4_RM
+    jb      .mod_ins3_rm        ; It's a mode instruction3 r/m byte
+    jz      .mod_ins4_rm        ; It's a mode instruction4 r/m byte
+.mod_ins5_rm:                   ; Else it's a mode instruction5 r/m byte
+    and     ah,0b_00_111_000    ; Get the extended instruction part
+    cmp     ah,0b_00_111_000    ; Only instruction 111 is not defined
+    jz      .ExitInvalid
+    mov     ah,bh
+    and     ah,0b_11_000_000    ; Check mode part
+    cmp     ah,0b_11_000_000    ; JMP or CALL with register is invalid
+    jz      .ExitInvalid
+    jmp     .mod_reg_rm
+    
+.mod_ins4_rm:
+    and     ah,0b_00_111_000    ; Get the extended instruction part
+    cmp     ah,0b_00_001_000    ; only INC (000), DEC (001) is valid
+    ja      .ExitInvalid
+    jmp     .mod_reg_rm         ; Otherwise the lengths are the same
+
+.mod_ins3_rm:
+    and     ah,0b_00_111_000    ; Get the extended instruction part
+    jz      .inst_test_rm_imm
+    cmp     ah,0b_00_001_000    ; Extended instruction 001 is invalid
+    jz      .ExitInvalid
+    jmp     .mod_reg_rm         ; Else it's need to be decoded just list normal mode rm byte
+
+.inst_test_rm_imm:
+    test    byte [di],1         ; Instruction byte's 0 bit has the info of the length of
+    jz      .inst_test_rm_imm8  ; immediate parameter
+    inc     cx
+.inst_test_rm_imm8:
+    inc     cx
+    jmp     .mod_reg_rm
+
+.mod_ins2_rm:                   ; It's almost the same, just 110 inst is not defined
+    and     ah,0b_00_111_000    ; Get the extended instruction part
+    cmp     ah,0b_00_110_000    ; Check for invalid instruction
+    jz      .ExitInvalid        ; Handle invalid extended instruction
+.mod_reg_rm:
+    mov     ah,bh               ; Restore AH, and resolve as normal mode reg r/m byte
     and     ah,0b_11_000_111    ; Mask out reg part
     cmp     ah,0b_00_000_110    ; Special case: no index, just disp16
     jz      .IncLen2
@@ -242,13 +306,18 @@ GetInstructionLength:
 .IncLen:
     inc     cx
 .ModRmSizeReady:
-    es mov  ah,byte [di-1]      ; Check previous byte
+    ; TODO: need to rethink prefix addition
+    mov     ah,byte [di-1]      ; Check previous byte
     and     ah,0b_11100111
     cmp     ah,0x26             ; Is it a segment prefix?
     jnz     .haveNoSegPrefix
     dec     di                  ; We have prefix, ES:DI points to prefix
     inc     cx                  ; Instruction length +1
 .haveNoSegPrefix:
+.Exit:
+    ret
+.ExitInvalid:
+    xor     cx,cx
     ret
 
 ;----------------------------------------------------------------------------
