@@ -76,7 +76,7 @@ InitAutoPatcher:
     ; mod  : 00=disp0, 01=disp8, 10=disp16, 11=reg
     ; 10001110 : 11 sreg3 reg -> 1 bytes
     ; 10001110 : mod sreg3 r/m
-    mov     al,byte [di]        ; Load Mod/sreg/rm byte
+    es mov  al,byte [di]        ; Load Mod/sreg/rm byte
     and     al,0b_00_111_000
     jz      MovConfirmed.ds_or_es   ; it's a MOV ES,something since ES=000
     cmp     al,0b_00_011_000
@@ -95,7 +95,7 @@ MovConfirmed:
     
     ; Let's calculate instruction length with prefix included
     ; DS = CS, ES:DI: current instruction, AL,AH: instruction, mode r/m byte
-    mov     ax,word [di]        ; Load instruction + 1 byte (probably mode reg r/m)
+    es mov  ax,word [di]        ; Load instruction + 1 byte (probably mode reg r/m)
     call    GetInstructionLength
     ; CX = instruction length
     jcxz    .invalid            ; Skip creating breakpoint, if it's invalid
