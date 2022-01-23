@@ -33,7 +33,7 @@ Malloc_InstStore:
 ; IN:
 ;   - Stack + 4: caller's CS:IP
 ;-------------------------------
-InitAutoPatcher:
+Init AutoPatcher:
     push    bp
     mov     bp,sp
     add     bp,2                ; BP points to stack on function entry
@@ -53,7 +53,11 @@ InitAutoPatcher:
     mov     ax,cs
     mov     ds,ax               ; DS = CS // needs the instruction length calculator
     
-    mov     es,word [bp+(2+2)]  ; INT 10h caller's CS on stack
+    mov     ah,0x51             ; Undocumented DOS function: get current PSP
+    int     0x21
+    mov     es,bx               ; PSP of currently running application
+    
+    ;mov     es,word [bp+(2+2)]  ; INT 10h caller's CS on stack
     ; Find E8 instructions on callers CS segment
     ; TODO: check less, if loaded program is smaller
     mov     cx,0xffff-0x10-5    ; Check whole segment - 16 - 5 (not to roll around the segment edge)
