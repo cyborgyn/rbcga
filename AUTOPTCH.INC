@@ -88,7 +88,6 @@ MovConfirmed:
     mov     al,0x80             ; InstStore.Status flag: DS
                                 ; If it was ES, AL already = 00
 .ds_or_es:                      ; It is MOV ES,xxx or MOV DS,xxx
-    mov     dl,al               ; Save state byte for later use
     push    cx
     dec     di                  ; ES:DI points to instruction
     
@@ -97,12 +96,16 @@ MovConfirmed:
     call    CheckInstruction
     ; CX = instruction length
     jcxz    .invalid            ; Skip creating breakpoint, if it's invalid
-    mov     al,dl               ; restore state byte
     or      al,cl               ; Set length (bit 0-2) in status byte
     ; Create a breakpoint at ES:DI
     call    CreateBreakPoint
+    pop     cx
+    or      cx,cx
+    jnz     InitAutoPatcher.find_next_MOV
+
 .invalid:
     pop     cx
+    inc     di
     or      cx,cx
     jnz     InitAutoPatcher.find_next_MOV
 
@@ -357,20 +360,24 @@ GetInstructionLength:
 ;   - ES:DI= pointer to instruction with prefix (if exisits)
 ;-------------------------------
 CheckInstruction:
+    push    ax
     mov     dx,-8               ; Start checking instructions from 8 bytes before
 .startCheck:
     mov     bp,dx
+    xor     bx,bx
 .check:
     call    GetInstructionLength
     jcxz    .invalid            ; If any in-between instruction is invalid, we need
                                 ; to check further back
     add     bp,cx               ; Point to next instruction's beginning
+    test    bp,0x8000           ; Check sign bit
+    jnz     .check
     cmp     bp,0
     ja      .invalid            ; If previous instruction's added length points past
                                 ; the checked instruction, then it's inside => invalid
-    jz      .Exit               ; Else, if it's exactly pointing to instruction, then
+                                ; Else, if it's exactly pointing to instruction, then
                                 ; the instruction is valid
-    jmp     .check              ; if it's still below, we check the next instruction
+    jmp     .Exit               ; if it's still below, we check the next instruction
 .invalid:
     dec     dx                  ; Try from one bytes longer back
     cmp     dx,-16
@@ -387,9 +394,11 @@ CheckInstruction:
     dec     di                  ; If there is prefix, we also want that
     inc     cx
 .noPrefix:
+    pop     ax
     ret
 .ExitInvalid:
     xor     cx,cx
+    pop     ax
     ret
 
 ;----------------------------------------------------------------------------
