@@ -33,7 +33,8 @@ Malloc_InstStore:
 ; IN:
 ;   - Stack + 4: caller's CS:IP
 ;-------------------------------
-Init AutoPatcher:
+MaxSegment: dw  0
+InitAutoPatcher:
     push    bp
     mov     bp,sp
     add     bp,2                ; BP points to stack on function entry
@@ -56,10 +57,14 @@ Init AutoPatcher:
     mov     ah,0x51             ; Undocumented DOS function: get current PSP
     int     0x21
     mov     es,bx               ; PSP of currently running application
-    
-    ;mov     es,word [bp+(2+2)]  ; INT 10h caller's CS on stack
+    es mov  ax,[2]              ; Max segment for current application
+    add     bx,0x10             ; Skip size of PSP
+    mov     es,bx
+    sub     ax,0x1000           ; DX = max segment we can scan
+    cs mov  word [MaxSegment - PART_TSR],ax
+
+.find_in_segment:
     ; Find E8 instructions on callers CS segment
-    ; TODO: check less, if loaded program is smaller
     mov     cx,0xffff-0x10-5    ; Check whole segment - 16 - 5 (not to roll around the segment edge)
     mov     di,0x10             ; Starting from the beginning + 16 bytes
     cld
@@ -70,9 +75,15 @@ Init AutoPatcher:
     cs cmp  ax,word [InstStoreSize - PART_TSR]
     jnb     Instrumented        ; If no more room for breakpoints, exit
     
+    mov     al,0xc5             ; LDS
+    repne scasb
+    jcxz    .nextSegment
+    mov     al,0x80             ; Indicate DS
+    jmp     MovConfirmed.ds_or_es
+    
     mov     al,0x8e             ; MOV sreg,xxx first byte
     repne scasb                 ; ~1M cycles = 0.2s for 64k
-    jcxz    Instrumented
+    jcxz    .nextSegment
     
     ; sreg3: ES=000, DS=011
     ; reg  : 000-111=AX,CX,DX,BX,SP,BP,SI,DI
@@ -88,6 +99,15 @@ Init AutoPatcher:
     dec     cx
     jmp     .find_next_MOV      ; If it's not dealing with DS or ES
                                 ; we leave it alone
+.nextSegment:
+    mov     ax,es
+    add     ax,0x1000
+    cs cmp  ax,word [MaxSegment - PART_TSR]
+    ja      Instrumented
+    ; TODO: check last partial segment as well
+    mov     es,ax
+    jmp     .find_in_segment
+
 MovConfirmed:
     mov     al,0x80             ; InstStore.Status flag: DS
                                 ; If it was ES, AL already = 00
@@ -104,14 +124,13 @@ MovConfirmed:
     ; Create a breakpoint at ES:DI
     call    CreateBreakPoint
     pop     cx
-    or      cx,cx
-    jnz     InitAutoPatcher.find_next_MOV
+    ; TODO: sub cx,inst len
+    jmp     InitAutoPatcher.find_next_MOV
 
 .invalid:
     pop     cx
     inc     di
-    or      cx,cx
-    jnz     InitAutoPatcher.find_next_MOV
+    jmp     InitAutoPatcher.find_next_MOV
 
 Instrumented:
     ; TODO: also implement POP DS,ES search and instrumentation (1F & 07)
@@ -482,6 +501,9 @@ EvalSegment:
 Break:
 .IP:        dw 0
 .CS:        dw 0
+BreakPointChecked:
+    dw      0           ; pointer to breakpoint which was recently checked
+
 
 INT_3:
     ; Save CPU state
@@ -613,6 +635,8 @@ BreakPointFound:
     pop     ax
     cs mov  sp,word [REGSTORE3.SP - PART_TSR]
     cs mov  ss,word [REGSTORE3.SS - PART_TSR]
+    add     sp,6                ; Need to reset SP to state before IRET (CS,IP,Flags)
+                                ; to be able to simulate POP sreg instructions
 .simulationArea:
     nop                         ; This will be a MOV {DS,ES}, something
     nop
@@ -620,6 +644,24 @@ BreakPointFound:
     nop
     nop
     
+    ; TODO: With LDS/LES reg,mem we need to restore the new other register as well
+    
+    sub     sp,6                ; Restore SP
+    cs cmp  sp,word [REGSTORE3.SP - PART_TSR]   ; and check against stored version
+    jz      .simulationReady
+    
+    ; If SP was changed, it was a POP instruction, we need to adjust caller's stack
+    add     sp,6
+    cs mov  bp,word [REGSTORE3.SP - PART_TSR]
+    ss mov  ax,word [bp+4]        ; Move iret CS,IP,FLAGS 1 word up
+    push    ax
+    ss mov  ax,word [bp+2]
+    push    ax
+    ss mov  ax,word [bp]
+    push    ax
+    cs mov  word [REGSTORE3.SP - PART_TSR],sp
+    
+.simulationReady:
     mov     sp,cs               ; Restore INT3 stack with saved registers
     mov     ss,sp
     mov     sp,INT_3.SP_TOP
@@ -681,8 +723,6 @@ InstStoreAddress:
     dw      0,0         ; Offset, Segment order
 InstStoreSize:
     dw      0
-BreakPointChecked:
-    dw      0           ; pointer to breakpoint which was recently checked
 
 ;    times 16-(($-PART_TSR) % 16) db 0xff   ; Padding to align InstStore to segment start
 ;----------------------------------------------------------------------------
@@ -700,7 +740,7 @@ BreakPointChecked:
 ;    dw      0
 ;.Status:        equ $-InstStore
 ;    db      0                   ; bit 0-2: Instruction length
-;                                ; bit 3-6: Reserved, must be 0
+;                                ; bit 3-6: high 4 bits of physical address
 ;                                ; bit 7: 0 if ES, 1 if DS is modified
 ;.Instruction:   equ $-InstStore
 ;    times 5 nop                 ; Max length = 5: Prefix, 8E, Mod, disp16_L, disp16_H
