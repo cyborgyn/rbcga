@@ -56,9 +56,8 @@ InitAutoPatcher:
     mov     es,word [bp+(2+2)]  ; INT 10h caller's CS on stack
     ; Find E8 instructions on callers CS segment
     ; TODO: check less, if loaded program is smaller
-    mov     cx,0xfffb           ; Check whole segment - 5 (not to roll around the segment edge)
-    xor     di,di               ; Starting from the beginning + 1
-    inc     di
+    mov     cx,0xffff-0x10-5    ; Check whole segment - 16 - 5 (not to roll around the segment edge)
+    mov     di,0x10             ; Starting from the beginning + 16 bytes
     cld
 .find_next_MOV:
     ; Top pointer of InstStore
@@ -94,9 +93,8 @@ MovConfirmed:
     dec     di                  ; ES:DI points to instruction
     
     ; Let's calculate instruction length with prefix included
-    ; DS = CS, ES:DI: current instruction, AL,AH: instruction, mode r/m byte
-    es mov  ax,word [di]        ; Load instruction + 1 byte (probably mode reg r/m)
-    call    GetInstructionLength
+    ; DS = CS, ES:DI: current instruction
+    call    CheckInstruction
     ; CX = instruction length
     jcxz    .invalid            ; Skip creating breakpoint, if it's invalid
     mov     al,dl               ; restore state byte
@@ -229,26 +227,39 @@ CreateBreakPoint:
 ;----------------------------------------------------------------------------
 ; Calculates instruction length according to mod/rm byte
 ; If there is segment prefix, it counts as well, and decrements DI
+; The prefix flag is:
+;   - bit 7: segment prefix
+;   - bit 6: string prefix
 ; IN:
 ;   - DS: CS
-;   - AL: instruction
-;   - AH: mod/rm byte (if any)
-;   - ES:DI: points to instruction
+;   - BL: prefix flag of last instruction
+;   - ES:DI+BP: points to instruction
 ; OUT:
 ;   - CX= length of instruction
-;   - ES:DI= pointer to instruction with prefix (if exisits)
+;   - BL= new prefix flag, if CX > 0
 ;-------------------------------
 GetInstructionLength:
-    ; Setup DS:BX for xlat
+    es mov  ax,word [di+bp]     ; Load instruction + 1 byte (probably mode reg r/m)
     xor     cx,cx
+    push    bx                  ; Save BX, as we have parameter inside BL
+    ; Setup DS:BX for xlat
     mov     bx,(Instructions - PART_TSR)
     xlat
-    mov     cl,al
+    pop     bx
+    mov     cl,al               ; Instruction descriptor into CX
+    
+    shr     al,1
+    shr     al,1
+    or      bl,al               ; BL bit 6-7: input, 4-5: output prefix flags
+    and     bl,0xf0
+    shl     al,1
+    shl     al,1
+    
     jcxz    .Exit               ; If AL = 0, it's an invalid instruction
     mov     bh,ah               ; Save AH for later reuse
     and     cl,0b_00000111      ; From instruction description we use length
     and     al,0b_00_111_000    ; Mask out mode r/m type
-    jz      .Exit               ; If not have any kind of mode r/m byte, we have the length already
+    jz      .CheckString        ; If not have any kind of mode r/m byte, we have the length already
     cmp     al,MOD_INS2_RM
     jb      .mod_reg_rm         ; It has regular mode reg r/m byte
     jz      .mod_ins2_rm        ; It's a mode instruction2 r/m byte
@@ -282,7 +293,7 @@ GetInstructionLength:
     jmp     .mod_reg_rm         ; Else it's need to be decoded just list normal mode rm byte
 
 .inst_test_rm_imm:
-    test    byte [di],1         ; Instruction byte's 0 bit has the info of the length of
+    es test byte [di+bp],1      ; Instruction byte's 0 bit has the info of the length of
     jz      .inst_test_rm_imm8  ; immediate parameter
     inc     cx
 .inst_test_rm_imm8:
@@ -301,7 +312,7 @@ GetInstructionLength:
     and     ah,0b_11_000_000    ; Mask out r/m part also
     jz      .ModRmSizeReady     ; Mod 00 -> just index, no more bytes (special case already handled)
     cmp     ah,0b_10_000_000
-    ja      .haveNoSegPrefix    ; Mod 11 -> just registers, no more bytes
+    ja      .NoPrefix           ; Mod 11 -> just registers, no more bytes
                                 ; In this case, segment prefix is also non-sense
     jb      .IncLen             ; Mod 01 -> disp8, 1 more byte
 .IncLen2:
@@ -309,15 +320,73 @@ GetInstructionLength:
 .IncLen:
     inc     cx
 .ModRmSizeReady:
-    ; TODO: need to rethink prefix addition
-    mov     ah,byte [di-1]      ; Check previous byte
-    and     ah,0b_11100111
-    cmp     ah,0x26             ; Is it a segment prefix?
-    jnz     .haveNoSegPrefix
-    dec     di                  ; We have prefix, ES:DI points to prefix
-    inc     cx                  ; Instruction length +1
-.haveNoSegPrefix:
+    test    bl,STR_PREFIX       ; Previous instruction shouldn't be string prefix
+    jnz     .ExitInvalid
 .Exit:
+    shl     bl,1                ; BL bits 4-5 will become new output prefix flags
+    shl     bl,1
+    ret
+.NoPrefix:
+    test    bl,SEG_PREFIX+STR_PREFIX    ; Previous instruction shouldn't be any prefix
+    jz      .Exit
+.ExitInvalid:
+    xor     cx,cx
+    ret
+.CheckString:
+    cmp     cl,1
+    ja      .Exit
+    es mov  al,byte [di+bp]     ; One byte instruction then
+    cmp     al,0xa0             ; Between A0 & B0, the 1 length instructions are string prefixable
+    jb      .NoPrefix
+    cmp     al,0xaf
+    ja      .NoPrefix
+    test    bl,SEG_PREFIX       ; But segment prefix is invalid for them
+    jnz     .ExitInvalid
+    jmp     .Exit
+
+;----------------------------------------------------------------------------
+; Evaluates current instruction if it's not inside an other one
+; If not, gives back the length of it, and also corrects pointer to include
+; segment prefix.
+; If it's not valid, then returns 0
+; IN:
+;   - DS: CS
+;   - ES:DI: points to instruction
+; OUT:
+;   - CX= length of instruction
+;   - ES:DI= pointer to instruction with prefix (if exisits)
+;-------------------------------
+CheckInstruction:
+    mov     dx,-8               ; Start checking instructions from 8 bytes before
+.startCheck:
+    mov     bp,dx
+.check:
+    call    GetInstructionLength
+    jcxz    .invalid            ; If any in-between instruction is invalid, we need
+                                ; to check further back
+    add     bp,cx               ; Point to next instruction's beginning
+    cmp     bp,0
+    ja      .invalid            ; If previous instruction's added length points past
+                                ; the checked instruction, then it's inside => invalid
+    jz      .Exit               ; Else, if it's exactly pointing to instruction, then
+                                ; the instruction is valid
+    jmp     .check              ; if it's still below, we check the next instruction
+.invalid:
+    dec     dx                  ; Try from one bytes longer back
+    cmp     dx,-16
+    jb      .ExitInvalid        ; If after 16 bytes it's still invalid, then
+                                ; we give up checking
+    jmp     .startCheck
+
+.Exit:
+    mov     dx,bx               ; Save last instruction's prefix flags
+    call    GetInstructionLength
+    jcxz    .ExitInvalid
+    test    dl,0b_11_000000     ; Check for prefix
+    jz      .noPrefix
+    dec     di                  ; If there is prefix, we also want that
+    inc     cx
+.noPrefix:
     ret
 .ExitInvalid:
     xor     cx,cx
