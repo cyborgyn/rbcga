@@ -76,10 +76,10 @@ InitAutoPatcher:
     jnb     Instrumented        ; If no more room for breakpoints, exit
     
     ;------------- TESTING PURPOSE ---------------
-    mov     al,0xc5             ; LDS
+    mov     al,0xc4             ; LES
     repne scasb
     jcxz    .nextSegment
-    mov     al,0x80             ; Indicate DS
+    mov     al,0x00             ; Indicate ES
     jmp     MovConfirmed.ds_or_es
     ;------------- TESTING PURPOSE ---------------
     
