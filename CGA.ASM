@@ -127,6 +127,7 @@ REGSTORE:   ; SS,SP temp storage during IRQ
 .SS:    dw      0
 .SP:    dw      0
 REGSTORE3:
+.SP2    dw      0
 .SP:    dw      0
 .SS:    dw      0
 

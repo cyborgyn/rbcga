@@ -75,11 +75,13 @@ InitAutoPatcher:
     cs cmp  ax,word [InstStoreSize - PART_TSR]
     jnb     Instrumented        ; If no more room for breakpoints, exit
     
+    ;------------- TESTING PURPOSE ---------------
     mov     al,0xc5             ; LDS
     repne scasb
     jcxz    .nextSegment
     mov     al,0x80             ; Indicate DS
     jmp     MovConfirmed.ds_or_es
+    ;------------- TESTING PURPOSE ---------------
     
     mov     al,0x8e             ; MOV sreg,xxx first byte
     repne scasb                 ; ~1M cycles = 0.2s for 64k
@@ -533,7 +535,7 @@ INT_3:
     cs lds  si,[REGSTORE3.SP - PART_TSR]
     ; Copy breakpoint data
     lodsw                       ; Copy breakpoint IP
-    dec     ax                  ; pointing to INT3 instead after it
+    dec     ax                  ; pointing to INT3 instead of after it
     stosw
     movsw                       ; Copy breakpoint CS
     
@@ -603,10 +605,10 @@ Search:
 
 BreakPointFound:
     cs mov  word [BreakPointChecked - PART_TSR],bx
-    mov     si,bx
+    mov     si,bx               ; Prepare to copy original instruction to simulation area
     add     si,2
     mov     di,.simulationArea - PART_TSR
-    lodsb                       ; Load status into AL
+    lodsb                       ; Load breakpoint status into AL
     mov     cx,5
     rep movsb                   ; Copy original instruction to simulation area
     
@@ -644,27 +646,42 @@ BreakPointFound:
     nop
     nop
     
-    ; TODO: With LDS/LES reg,mem we need to restore the new other register as well
-    
-    sub     sp,6                ; Restore SP
-    cs cmp  sp,word [REGSTORE3.SP - PART_TSR]   ; and check against stored version
-    jz      .simulationReady
-    
-    ; If SP was changed, it was a POP instruction, we need to adjust caller's stack
-    add     sp,6
-    cs mov  bp,word [REGSTORE3.SP - PART_TSR]
-    ss mov  ax,word [bp+4]        ; Move iret CS,IP,FLAGS 1 word up
-    push    ax
-    ss mov  ax,word [bp+2]
-    push    ax
-    ss mov  ax,word [bp]
-    push    ax
-    cs mov  word [REGSTORE3.SP - PART_TSR],sp
-    
-.simulationReady:
+    sub     sp,6                ; Restore SP to point after IRET info on stack (hopefullt)
+    cs mov  word [REGSTORE3.SP2 - PART_TSR],sp
     mov     sp,cs               ; Restore INT3 stack with saved registers
     mov     ss,sp
-    mov     sp,INT_3.SP_TOP
+    mov     sp,(Int3Stack.Top - PART_TSR)
+    push    ax                  ; Update all registers (some could have been changed
+    push    bx
+    push    cx
+    push    dx
+    push    si
+    push    di
+    push    bp
+    push    ds
+    push    es
+    
+    ; Compare old SP to new one
+    cs mov  di,word [REGSTORE3.SP2 - PART_TSR]
+    cs mov  si,word [REGSTORE3.SP - PART_TSR]
+    cmp     si,di
+    jz      Evaluation
+
+    ; If SP was changed, it was a POP instruction, we need to adjust caller's stack
+    ; DS:SI = app SS:SP+6, BX = -2 (or the difference)
+    push    ds
+    push    es
+    std
+    mov     ds,word [REGSTORE3.SS - PART_TSR]
+    mov     es,word [REGSTORE3.SS - PART_TSR]
+    add     si,6
+    add     di,6
+    movsw                       ; Move up iret info (CS:IP, Flags)
+    movsw
+    movsw                       ; ... and store new SP
+    cs mov  word [REGSTORE3.SP - PART_TSR],di
+    pop     es
+    pop     ds
 
 Evaluation:
     ; JMP .evalES instruction
